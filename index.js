@@ -43,7 +43,10 @@ client.on("interactionCreate", async interaction => {
   if (interaction.commandName !== "girls") return;
 
   const member = interaction.options.getMember("usuario");
-  const role = interaction.guild.roles.cache.find(r => r.name === "Girls");
+  const role = interaction.guild.roles.cache.find(
+  r => r.name === "﹒╴girls ღﾟ˚̣̣̣"
+);
+
 
   if (!role) {
     return interaction.reply({ content: "❌ No existe el rol **Girls**", ephemeral: true });
