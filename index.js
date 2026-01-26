@@ -41,6 +41,29 @@ client.once("ready", async () => {
 client.on("interactionCreate", async interaction => {
   if (!interaction.isChatInputCommand()) return;
   if (interaction.commandName !== "girls") return;
+  
+   // ✅ Solo Admin / Mod / Helper / Owner (por ID)
+  const allowedRoleIds = [
+    "1447179100551905321", // Admin
+    "1222199503873114175", // Mod
+    "996585466197454929",  // Helper
+    "997485830341918730",  // Owner
+  ];
+
+  const invoker = interaction.member;
+
+  const hasAllowedRole = invoker.roles.cache.some(role =>
+    allowedRoleIds.includes(role.id)
+  );
+
+  if (!hasAllowedRole) {
+    return interaction.reply({
+      content: "❌ No tienes permiso para usar este comando.",
+      ephemeral: true,
+    });
+  }
+
+  // ⬇️ TU CÓDIGO ORIGINAL (NO SE BORRA)
 
   const member = interaction.options.getMember("usuario");
   const role = interaction.guild.roles.cache.find(
