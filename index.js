@@ -90,8 +90,21 @@ client.on("interactionCreate", async interaction => {
     return interaction.reply({ content: "ℹ️ Ese usuario ya tiene el rol Girls", ephemeral: true });
   }
 
-  await member.roles.add(role);
-  interaction.reply(`✅ Rol **Girls** asignado a ${member}`);
+// ID del rol "no verificadas"
+const NO_VERIFICADAS_ROLE_ID = "996592241260888095";
+
+// 1️⃣ Asignar Girls
+await member.roles.add(role);
+
+// 2️⃣ Quitar "no verificadas" si lo tiene
+if (member.roles.cache.has(NO_VERIFICADAS_ROLE_ID)) {
+  await member.roles.remove(NO_VERIFICADAS_ROLE_ID);
+}
+
+interaction.reply({
+  content: `✅ Rol **Girls** asignado a ${member} y se removió **no verificadas**.`,
+  ephemeral: false
 });
+
 
 client.login(DISCORD_TOKEN);
