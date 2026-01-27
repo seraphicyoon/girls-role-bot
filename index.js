@@ -11,6 +11,9 @@ const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
 const GUILD_ID = process.env.GUILD_ID;
 
+// ✅ Canal privado para logs (lo agregaste en Railway)
+const LOG_CHANNEL_ID = process.env.LOG_CHANNEL_ID;
+
 // ===== CONFIG =====
 const NO_VERIFICADAS_ROLE_ID = "996592241260888095";
 const GIRLS_ROLE_NAME = "﹒╴girls ღﾟ˚̣̣̣";
@@ -75,21 +78,21 @@ async function registerCommands() {
 client.once("ready", async () => {
   console.log(`🤖 Bot conectado como ${client.user.tag}`);
 
-  // ✅ Si falla el registro, NO crashea el bot
   try {
     await registerCommands();
     console.log("✅ Comandos registrados/actualizados.");
   } catch (e) {
     console.error("❌ Error registrando comandos:", e);
   }
+
+  if (!LOG_CHANNEL_ID) {
+    console.log("⚠️ LOG_CHANNEL_ID no está configurado en Railway (Variables).");
+  }
 });
 
 // ===== HELPERS =====
 async function invokerHasPermission(interaction) {
-  // Solo en servidor (por seguridad)
   if (!interaction.inGuild()) return false;
-
-  // Fetch del miembro real (más confiable que interaction.member)
   const invoker = await interaction.guild.members.fetch(interaction.user.id);
   return invoker.roles.cache.some((r) => allowedRoleIds.includes(r.id));
 }
@@ -106,7 +109,7 @@ function getPendientes(guild) {
   });
 }
 
-// ===== INTERACTIONS (con try/catch global para evitar crash) =====
+// ===== INTERACTIONS =====
 client.on("interactionCreate", async (interaction) => {
   try {
     if (!interaction.isChatInputCommand()) return;
@@ -127,10 +130,33 @@ client.on("interactionCreate", async (interaction) => {
         return interaction.editReply("❌ No se permite usar @everyone/@here con /say.");
       }
 
-      await interaction.channel.send({
+      // 1) Mandar al canal público (sin pings)
+      const sentMessage = await interaction.channel.send({
         content: texto,
-        allowedMentions: { parse: [] }, // evita pings accidentales
+        allowedMentions: { parse: [] },
       });
+
+      // 2) Log privado (si existe LOG_CHANNEL_ID)
+      if (LOG_CHANNEL_ID) {
+        const logChannel = await interaction.guild.channels
+          .fetch(LOG_CHANNEL_ID)
+          .catch(() => null);
+
+        if (logChannel && logChannel.isTextBased()) {
+          const jumpLink = `https://discord.com/channels/${interaction.guildId}/${interaction.channelId}/${sentMessage.id}`;
+
+          await logChannel.send({
+            content:
+              `📝 **/say usado**\n` +
+              `👤 Usuario: ${interaction.user.tag} (${interaction.user.id})\n` +
+              `📍 Canal: <#${interaction.channelId}>\n` +
+              `🔗 Link: ${jumpLink}\n` +
+              `🕒 Hora: <t:${Math.floor(Date.now() / 1000)}:f>\n` +
+              `💬 Mensaje:\n>>> ${texto}`,
+            allowedMentions: { parse: [] },
+          });
+        }
+      }
 
       return interaction.editReply("✅ Mensaje enviado.");
     }
@@ -252,7 +278,6 @@ client.on("interactionCreate", async (interaction) => {
   } catch (err) {
     console.error("❌ Error en interactionCreate:", err);
 
-    // Intentar responder si se puede (para que no se quede “pensando”)
     try {
       if (interaction.isChatInputCommand()) {
         if (!interaction.deferred && !interaction.replied) {
