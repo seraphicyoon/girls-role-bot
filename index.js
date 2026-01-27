@@ -27,7 +27,7 @@ const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers],
 });
 
-// ✅ /girls
+// /girls
 const girlsCommand = new SlashCommandBuilder()
   .setName("girls")
   .setDescription("Asigna el rol Girls al usuario indicado")
@@ -38,10 +38,10 @@ const girlsCommand = new SlashCommandBuilder()
       .setRequired(true)
   );
 
-// ✅ /pendientes
+// /pendientes (5+ días)
 const pendientesCommand = new SlashCommandBuilder()
   .setName("pendientes")
-  .setDescription("Lista personas con 'no verificadas' de exactamente 5 días");
+  .setDescription("Lista personas con 'no verificadas' desde hace 5+ días");
 
 async function registerCommands() {
   const rest = new REST({ version: "10" }).setToken(DISCORD_TOKEN);
@@ -64,7 +64,7 @@ client.on("interactionCreate", async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
 
   // =========================
-  // /pendientes (EXACTAMENTE 5 días)
+  // /pendientes (5+ días)
   // =========================
   if (interaction.commandName === "pendientes") {
     try {
@@ -74,30 +74,22 @@ client.on("interactionCreate", async (interaction) => {
         return interaction.editReply("❌ No tienes permiso para usar este comando.");
       }
 
-      // EXACTAMENTE 5 días => entre 5 y 6 días atrás:
-      const fiveDaysMs = 5 * 24 * 60 * 60 * 1000;
-      const sixDaysMs = 6 * 24 * 60 * 60 * 1000;
+      const cutoffMs = 5 * 24 * 60 * 60 * 1000; // 5 días
+      const cutoffDate = new Date(Date.now() - cutoffMs);
 
-      const fiveDaysAgo = new Date(Date.now() - fiveDaysMs);
-      const sixDaysAgo = new Date(Date.now() - sixDaysMs);
-
-      // Trae miembros para tener joinedAt + roles en cache
       await interaction.guild.members.fetch();
 
       const pendientes = interaction.guild.members.cache.filter((m) => {
-        if (m.user.bot) return false; // ignora bots
-        if (!m.roles.cache.has(NO_VERIFICADAS_ROLE_ID)) return false; // sigue "no verificadas"
+        if (m.user.bot) return false;
+        if (!m.roles.cache.has(NO_VERIFICADAS_ROLE_ID)) return false;
         if (!m.joinedAt) return false;
-
-        // EXACTO: joinedAt <= hace 5 días Y joinedAt > hace 6 días
-        return m.joinedAt <= fiveDaysAgo && m.joinedAt > sixDaysAgo;
+        return m.joinedAt <= cutoffDate; // 5 o más días
       });
 
       if (pendientes.size === 0) {
-        return interaction.editReply("✅ No hay personas con **no verificadas** de exactamente 5 días.");
+        return interaction.editReply("✅ No hay personas con **no verificadas** desde hace 5+ días.");
       }
 
-      // Ordenar: más antiguas primero (cercanas a 6d primero)
       const sorted = [...pendientes.values()].sort((a, b) => a.joinedAt - b.joinedAt);
 
       const maxShow = 40;
@@ -107,7 +99,7 @@ client.on("interactionCreate", async (interaction) => {
       });
 
       let msg =
-        `📌 **Pendientes (exactamente 5 días con no verificadas):** ${pendientes.size}\n\n` +
+        `📌 **Pendientes (5+ días con no verificadas):** ${pendientes.size}\n\n` +
         lines.join("\n");
 
       if (pendientes.size > maxShow) {
@@ -146,7 +138,6 @@ client.on("interactionCreate", async (interaction) => {
       }
 
       const noVerRole = interaction.guild.roles.cache.get(NO_VERIFICADAS_ROLE_ID);
-
       const me = await interaction.guild.members.fetchMe();
 
       if (!me.permissions.has(PermissionsBitField.Flags.ManageRoles)) {
