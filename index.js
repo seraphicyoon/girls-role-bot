@@ -41,7 +41,7 @@ const girlsCommand = new SlashCommandBuilder()
 // ✅ /pendientes
 const pendientesCommand = new SlashCommandBuilder()
   .setName("pendientes")
-  .setDescription("Lista personas con 'no verificadas' desde hace 5+ días");
+  .setDescription("Lista personas con 'no verificadas' de exactamente 5 días");
 
 async function registerCommands() {
   const rest = new REST({ version: "10" }).setToken(DISCORD_TOKEN);
@@ -64,7 +64,7 @@ client.on("interactionCreate", async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
 
   // =========================
-  // /pendientes
+  // /pendientes (EXACTAMENTE 5 días)
   // =========================
   if (interaction.commandName === "pendientes") {
     try {
@@ -74,8 +74,12 @@ client.on("interactionCreate", async (interaction) => {
         return interaction.editReply("❌ No tienes permiso para usar este comando.");
       }
 
-      const cutoffMs = 5 * 24 * 60 * 60 * 1000; // 5 días
-      const cutoffDate = new Date(Date.now() - cutoffMs);
+      // EXACTAMENTE 5 días => entre 5 y 6 días atrás:
+      const fiveDaysMs = 5 * 24 * 60 * 60 * 1000;
+      const sixDaysMs = 6 * 24 * 60 * 60 * 1000;
+
+      const fiveDaysAgo = new Date(Date.now() - fiveDaysMs);
+      const sixDaysAgo = new Date(Date.now() - sixDaysMs);
 
       // Trae miembros para tener joinedAt + roles en cache
       await interaction.guild.members.fetch();
@@ -84,25 +88,27 @@ client.on("interactionCreate", async (interaction) => {
         if (m.user.bot) return false; // ignora bots
         if (!m.roles.cache.has(NO_VERIFICADAS_ROLE_ID)) return false; // sigue "no verificadas"
         if (!m.joinedAt) return false;
-        return m.joinedAt <= cutoffDate; // 5+ días
+
+        // EXACTO: joinedAt <= hace 5 días Y joinedAt > hace 6 días
+        return m.joinedAt <= fiveDaysAgo && m.joinedAt > sixDaysAgo;
       });
 
       if (pendientes.size === 0) {
-        return interaction.editReply("✅ No hay personas con **no verificadas** desde hace 5+ días.");
+        return interaction.editReply("✅ No hay personas con **no verificadas** de exactamente 5 días.");
       }
 
-      // Ordenar: más antiguas primero
+      // Ordenar: más antiguas primero (cercanas a 6d primero)
       const sorted = [...pendientes.values()].sort((a, b) => a.joinedAt - b.joinedAt);
 
-      // Discord tiene límite de caracteres; mostramos hasta 40 por seguridad
       const maxShow = 40;
       const lines = sorted.slice(0, maxShow).map((m, i) => {
         const joinedTs = Math.floor(m.joinedAt.getTime() / 1000);
-        // <t:...:R> muestra "hace X días"
         return `${i + 1}. ${m} — entró <t:${joinedTs}:R>`;
       });
 
-      let msg = `📌 **Pendientes (5+ días con no verificadas):** ${pendientes.size}\n\n${lines.join("\n")}`;
+      let msg =
+        `📌 **Pendientes (exactamente 5 días con no verificadas):** ${pendientes.size}\n\n` +
+        lines.join("\n");
 
       if (pendientes.size > maxShow) {
         msg += `\n\n…y ${pendientes.size - maxShow} más.`;
@@ -129,29 +135,24 @@ client.on("interactionCreate", async (interaction) => {
         return interaction.editReply("❌ No tienes permiso para usar este comando.");
       }
 
-      // Usuario objetivo
       const member = interaction.options.getMember("usuario");
       if (!member) {
         return interaction.editReply("❌ No pude obtener al usuario. Intenta otra vez.");
       }
 
-      // Rol Girls (por nombre exacto)
       const girlsRole = interaction.guild.roles.cache.find((r) => r.name === GIRLS_ROLE_NAME);
       if (!girlsRole) {
         return interaction.editReply(`❌ No existe el rol **${GIRLS_ROLE_NAME}**.`);
       }
 
-      // Rol no verificadas (por ID)
       const noVerRole = interaction.guild.roles.cache.get(NO_VERIFICADAS_ROLE_ID);
 
-      // Permisos del bot
       const me = await interaction.guild.members.fetchMe();
 
       if (!me.permissions.has(PermissionsBitField.Flags.ManageRoles)) {
         return interaction.editReply("❌ No tengo permiso **Manage Roles**.");
       }
 
-      // Jerarquía del bot
       if (me.roles.highest.position <= girlsRole.position) {
         return interaction.editReply("❌ Mi rol debe estar **arriba** del rol Girls.");
       }
@@ -163,10 +164,8 @@ client.on("interactionCreate", async (interaction) => {
         return interaction.editReply("ℹ️ Ese usuario ya tiene el rol Girls.");
       }
 
-      // 1) Asignar Girls
       await member.roles.add(girlsRole);
 
-      // 2) Quitar "no verificadas" si lo tiene
       if (member.roles.cache.has(NO_VERIFICADAS_ROLE_ID)) {
         await member.roles.remove(NO_VERIFICADAS_ROLE_ID);
       }
@@ -184,5 +183,4 @@ client.on("interactionCreate", async (interaction) => {
   }
 });
 
-// ✅ Login UNA sola vez, al final del archivo
 client.login(DISCORD_TOKEN);
