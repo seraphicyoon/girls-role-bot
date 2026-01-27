@@ -11,7 +11,7 @@ const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
 const GUILD_ID = process.env.GUILD_ID;
 
-// ✅ Canal privado para logs (lo agregaste en Railway)
+// ✅ Canal privado para logs (Railway)
 const LOG_CHANNEL_ID = process.env.LOG_CHANNEL_ID;
 
 // ===== CONFIG =====
@@ -87,6 +87,8 @@ client.once("ready", async () => {
 
   if (!LOG_CHANNEL_ID) {
     console.log("⚠️ LOG_CHANNEL_ID no está configurado en Railway (Variables).");
+  } else {
+    console.log(`✅ LOG_CHANNEL_ID configurado: ${LOG_CHANNEL_ID}`);
   }
 });
 
@@ -109,6 +111,24 @@ function getPendientes(guild) {
   });
 }
 
+// ✅ manda log y si falla, regresa el error (para mostrártelo)
+async function sendLog(interaction, content) {
+  if (!LOG_CHANNEL_ID) return { ok: false, error: "LOG_CHANNEL_ID no configurado" };
+
+  try {
+    const logChannel = await interaction.guild.channels.fetch(LOG_CHANNEL_ID);
+
+    if (!logChannel) return { ok: false, error: "No se encontró el canal de logs" };
+    if (!logChannel.isTextBased()) return { ok: false, error: "El canal de logs no es de texto" };
+
+    await logChannel.send({ content, allowedMentions: { parse: [] } });
+    return { ok: true };
+  } catch (e) {
+    console.error("❌ Error enviando log:", e);
+    return { ok: false, error: e?.code || e?.message || "Error desconocido" };
+  }
+}
+
 // ===== INTERACTIONS =====
 client.on("interactionCreate", async (interaction) => {
   try {
@@ -125,37 +145,36 @@ client.on("interactionCreate", async (interaction) => {
 
       const texto = interaction.options.getString("mensaje", true);
 
-      // Seguridad: bloquear @everyone y @here
+      // bloquear everyone/here
       if (texto.includes("@everyone") || texto.includes("@here")) {
         return interaction.editReply("❌ No se permite usar @everyone/@here con /say.");
       }
 
-      // 1) Mandar al canal público (sin pings)
+      // 1) enviar al canal público (anónimo)
       const sentMessage = await interaction.channel.send({
         content: texto,
         allowedMentions: { parse: [] },
       });
 
-      // 2) Log privado (si existe LOG_CHANNEL_ID)
-      if (LOG_CHANNEL_ID) {
-        const logChannel = await interaction.guild.channels
-          .fetch(LOG_CHANNEL_ID)
-          .catch(() => null);
+      const jumpLink = `https://discord.com/channels/${interaction.guildId}/${interaction.channelId}/${sentMessage.id}`;
 
-        if (logChannel && logChannel.isTextBased()) {
-          const jumpLink = `https://discord.com/channels/${interaction.guildId}/${interaction.channelId}/${sentMessage.id}`;
+      // 2) log privado
+      const logText =
+        `📝 **/say usado**\n` +
+        `👤 Usuario: ${interaction.user.tag} (${interaction.user.id})\n` +
+        `📍 Canal: <#${interaction.channelId}>\n` +
+        `🔗 Link: ${jumpLink}\n` +
+        `🕒 Hora: <t:${Math.floor(Date.now() / 1000)}:f>\n` +
+        `💬 Mensaje:\n>>> ${texto}`;
 
-          await logChannel.send({
-            content:
-              `📝 **/say usado**\n` +
-              `👤 Usuario: ${interaction.user.tag} (${interaction.user.id})\n` +
-              `📍 Canal: <#${interaction.channelId}>\n` +
-              `🔗 Link: ${jumpLink}\n` +
-              `🕒 Hora: <t:${Math.floor(Date.now() / 1000)}:f>\n` +
-              `💬 Mensaje:\n>>> ${texto}`,
-            allowedMentions: { parse: [] },
-          });
-        }
+      const res = await sendLog(interaction, logText);
+
+      // ✅ si falló, te aviso en privado para que no andes a ciegas
+      if (!res.ok) {
+        await interaction.followUp({
+          content: `⚠️ El mensaje se envió, pero NO pude mandar el log a #log-lumi. Error: **${res.error}**`,
+          ephemeral: true,
+        });
       }
 
       return interaction.editReply("✅ Mensaje enviado.");
