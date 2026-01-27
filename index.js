@@ -55,10 +55,78 @@ const limpiarCommand = new SlashCommandBuilder()
 
 // ===== REGISTER =====
 async function registerCommands() {
+  const rest = new REST({ version: "10" }).setToken(DISCORD_TOKEN);const {
+  Client,
+  GatewayIntentBits,
+  PermissionsBitField,
+  REST,
+  Routes,
+  SlashCommandBuilder,
+} = require("discord.js");
+
+const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
+const CLIENT_ID = process.env.CLIENT_ID;
+const GUILD_ID = process.env.GUILD_ID;
+
+// ===== CONFIG =====
+const NO_VERIFICADAS_ROLE_ID = "996592241260888095";
+const GIRLS_ROLE_NAME = "﹒╴girls ღﾟ˚̣̣̣";
+
+// Roles que pueden usar los comandos
+const allowedRoleIds = [
+  "1447179100551905321", // Admin
+  "1222199503873114175", // Mod
+  "996585466197454929",  // Helper
+  "997485830341918730",  // Owner
+];
+
+// ===== CLIENT =====
+const client = new Client({
+  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers],
+});
+
+// ===== COMMANDS =====
+const girlsCommand = new SlashCommandBuilder()
+  .setName("girls")
+  .setDescription("Asigna el rol Girls y quita no verificadas")
+  .addUserOption(option =>
+    option
+      .setName("usuario")
+      .setDescription("Usuario a verificar")
+      .setRequired(true)
+  );
+
+const pendientesCommand = new SlashCommandBuilder()
+  .setName("pendientes")
+  .setDescription("Lista personas con no verificadas desde hace 5 días");
+
+const limpiarCommand = new SlashCommandBuilder()
+  .setName("limpiar_pendientes")
+  .setDescription("Expulsa personas con no verificadas (5 días)")
+  .addBooleanOption(option =>
+    option
+      .setName("confirmar")
+      .setDescription("⚠️ true = expulsar | false = solo preview")
+      .setRequired(true)
+  );
+
+// ✅ /say (anon)
+const sayCommand = new SlashCommandBuilder()
+  .setName("say")
+  .setDescription("Enviar un mensaje como el bot (anónimo)")
+  .addStringOption(option =>
+    option
+      .setName("mensaje")
+      .setDescription("Mensaje que enviará el bot")
+      .setRequired(true)
+  );
+
+// ===== REGISTER =====
+async function registerCommands() {
   const rest = new REST({ version: "10" }).setToken(DISCORD_TOKEN);
   await rest.put(
     Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID),
-    { body: [girlsCommand, pendientesCommand, limpiarCommand].map(c => c.toJSON()) }
+    { body: [girlsCommand, pendientesCommand, limpiarCommand, sayCommand].map(c => c.toJSON()) }
   );
 }
 
@@ -89,6 +157,30 @@ function getPendientes(guild) {
 // ===== INTERACTIONS =====
 client.on("interactionCreate", async interaction => {
   if (!interaction.isChatInputCommand()) return;
+
+  // ===== /say =====
+  if (interaction.commandName === "say") {
+    await interaction.deferReply({ ephemeral: true });
+
+    if (!invokerHasPermission(interaction)) {
+      return interaction.editReply("❌ No tienes permiso.");
+    }
+
+    const texto = interaction.options.getString("mensaje", true);
+
+    // Seguridad: bloquear @everyone y @here
+    if (texto.includes("@everyone") || texto.includes("@here")) {
+      return interaction.editReply("❌ No se permite usar @everyone/@here con /say.");
+    }
+
+    // Enviar mensaje público como el bot
+    await interaction.channel.send({
+      content: texto,
+      allowedMentions: { parse: [] }, // evita pings accidentales
+    });
+
+    return interaction.editReply("✅ Mensaje enviado.");
+  }
 
   // ===== /girls =====
   if (interaction.commandName === "girls") {
