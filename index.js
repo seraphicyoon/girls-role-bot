@@ -107,27 +107,49 @@ function getPendientes(guild) {
     if (m.user.bot) return false;
     if (!m.roles.cache.has(NO_VERIFICADAS_ROLE_ID)) return false;
     if (!m.joinedAt) return false;
-    return m.joinedAt.getTime() <= cutoff;
+    return m.joinedAt.getTime() <= cutoff; // 5 días o más
   });
 }
 
-// ✅ manda log y si falla, regresa el error (para mostrártelo)
-async function sendLog(interaction, content) {
-  if (!LOG_CHANNEL_ID) return { ok: false, error: "LOG_CHANNEL_ID no configurado" };
+// Nunca dejes que un fallo de logs rompa el comando
+async function sendLogSafe(interaction, content) {
+  if (!LOG_CHANNEL_ID) return;
 
   try {
-    const logChannel = await interaction.guild.channels.fetch(LOG_CHANNEL_ID);
-
-    if (!logChannel) return { ok: false, error: "No se encontró el canal de logs" };
-    if (!logChannel.isTextBased()) return { ok: false, error: "El canal de logs no es de texto" };
+    const logChannel = await interaction.guild.channels.fetch(LOG_CHANNEL_ID).catch(() => null);
+    if (!logChannel || !logChannel.isTextBased()) return;
 
     await logChannel.send({ content, allowedMentions: { parse: [] } });
-    return { ok: true };
   } catch (e) {
-    console.error("❌ Error enviando log:", e);
-    return { ok: false, error: e?.code || e?.message || "Error desconocido" };
+    console.error("❌ Error enviando log:", e?.message || e);
   }
 }
+
+function nowTs() {
+  return Math.floor(Date.now() / 1000);
+}
+
+// Respuesta segura (evita “Unknown interaction” si alguien spamea)
+async function safeDefer(interaction) {
+  try {
+    if (!interaction.deferred && !interaction.replied) {
+      await interaction.deferReply({ ephemeral: true });
+    }
+  } catch {}
+}
+async function safeEdit(interaction, content) {
+  try {
+    if (interaction.deferred || interaction.replied) {
+      return await interaction.editReply(content);
+    }
+    return await interaction.reply({ content, ephemeral: true });
+  } catch (e) {
+    console.error("❌ safeEdit error:", e?.message || e);
+  }
+}
+
+// ✅ Lock anti-spam por guild (para /limpiar_pendientes)
+const limpiarLocks = new Map(); // guildId -> boolean
 
 // ===== INTERACTIONS =====
 client.on("interactionCreate", async (interaction) => {
@@ -137,20 +159,18 @@ client.on("interactionCreate", async (interaction) => {
 
     // ===== /say =====
     if (interaction.commandName === "say") {
-      await interaction.deferReply({ ephemeral: true });
+      await safeDefer(interaction);
 
       if (!(await invokerHasPermission(interaction))) {
-        return interaction.editReply("❌ No tienes permiso.");
+        return safeEdit(interaction, "❌ No tienes permiso.");
       }
 
       const texto = interaction.options.getString("mensaje", true);
 
-      // bloquear everyone/here
       if (texto.includes("@everyone") || texto.includes("@here")) {
-        return interaction.editReply("❌ No se permite usar @everyone/@here con /say.");
+        return safeEdit(interaction, "❌ No se permite usar @everyone/@here con /say.");
       }
 
-      // 1) enviar al canal público (anónimo)
       const sentMessage = await interaction.channel.send({
         content: texto,
         allowedMentions: { parse: [] },
@@ -158,57 +178,46 @@ client.on("interactionCreate", async (interaction) => {
 
       const jumpLink = `https://discord.com/channels/${interaction.guildId}/${interaction.channelId}/${sentMessage.id}`;
 
-      // 2) log privado
-      const logText =
+      await sendLogSafe(
+        interaction,
         `📝 **/say usado**\n` +
-        `👤 Usuario: ${interaction.user.tag} (${interaction.user.id})\n` +
-        `📍 Canal: <#${interaction.channelId}>\n` +
-        `🔗 Link: ${jumpLink}\n` +
-        `🕒 Hora: <t:${Math.floor(Date.now() / 1000)}:f>\n` +
-        `💬 Mensaje:\n>>> ${texto}`;
+          `👤 Usuario: ${interaction.user.tag} (${interaction.user.id})\n` +
+          `📍 Canal: <#${interaction.channelId}>\n` +
+          `🔗 Link: ${jumpLink}\n` +
+          `🕒 Hora: <t:${nowTs()}:f>\n` +
+          `💬 Mensaje:\n>>> ${texto}`
+      );
 
-      const res = await sendLog(interaction, logText);
-
-      // ✅ si falló, te aviso en privado para que no andes a ciegas
-      if (!res.ok) {
-        await interaction.followUp({
-          content: `⚠️ El mensaje se envió, pero NO pude mandar el log a #log-lumi. Error: **${res.error}**`,
-          ephemeral: true,
-        });
-      }
-
-      return interaction.editReply("✅ Mensaje enviado.");
+      return safeEdit(interaction, "✅ Mensaje enviado.");
     }
 
     // ===== /girls =====
     if (interaction.commandName === "girls") {
-      await interaction.deferReply({ ephemeral: true });
+      await safeDefer(interaction);
 
       if (!(await invokerHasPermission(interaction))) {
-        return interaction.editReply("❌ No tienes permiso.");
+        return safeEdit(interaction, "❌ No tienes permiso.");
       }
 
       const member = interaction.options.getMember("usuario");
-      const girlsRole = interaction.guild.roles.cache.find(
-        (r) => r.name === GIRLS_ROLE_NAME
-      );
+      const girlsRole = interaction.guild.roles.cache.find((r) => r.name === GIRLS_ROLE_NAME);
 
       if (!member || !girlsRole) {
-        return interaction.editReply("❌ Error obteniendo usuario o rol.");
+        return safeEdit(interaction, "❌ Error obteniendo usuario o rol.");
       }
 
       const me = await interaction.guild.members.fetchMe();
 
       if (!me.permissions.has(PermissionsBitField.Flags.ManageRoles)) {
-        return interaction.editReply("❌ No tengo permiso Manage Roles.");
+        return safeEdit(interaction, "❌ No tengo permiso Manage Roles.");
       }
 
       if (me.roles.highest.position <= girlsRole.position) {
-        return interaction.editReply("❌ Mi rol debe estar arriba de Girls.");
+        return safeEdit(interaction, "❌ Mi rol debe estar arriba de Girls.");
       }
 
       if (member.roles.cache.has(girlsRole.id)) {
-        return interaction.editReply("ℹ️ Ya tiene Girls.");
+        return safeEdit(interaction, "ℹ️ Ya tiene Girls.");
       }
 
       await member.roles.add(girlsRole);
@@ -217,85 +226,140 @@ client.on("interactionCreate", async (interaction) => {
         await member.roles.remove(NO_VERIFICADAS_ROLE_ID);
       }
 
-      return interaction.editReply(
+      await sendLogSafe(
+        interaction,
+        `✅ **/girls usado**\n` +
+          `👤 Staff: ${interaction.user.tag} (${interaction.user.id})\n` +
+          `🎯 Usuario: ${member.user.tag} (${member.user.id})\n` +
+          `📍 Canal: <#${interaction.channelId}>\n` +
+          `🕒 Hora: <t:${nowTs()}:f>`
+      );
+
+      return safeEdit(
+        interaction,
         `✅ ${member} verificada: **Girls** asignado y **no verificadas** removido.`
       );
     }
 
     // ===== /pendientes =====
     if (interaction.commandName === "pendientes") {
-      await interaction.deferReply({ ephemeral: true });
+      await safeDefer(interaction);
 
       if (!(await invokerHasPermission(interaction))) {
-        return interaction.editReply("❌ No tienes permiso.");
+        return safeEdit(interaction, "❌ No tienes permiso.");
       }
 
       await interaction.guild.members.fetch();
       const pendientes = getPendientes(interaction.guild);
 
-      if (pendientes.size === 0) {
-        return interaction.editReply("✅ No hay pendientes de 5 días.");
-      }
-
       const list = [...pendientes.values()]
         .sort((a, b) => a.joinedAt - b.joinedAt)
+        .slice(0, 40)
         .map((m, i) => {
           const t = Math.floor(m.joinedAt.getTime() / 1000);
           return `${i + 1}. ${m} — entró <t:${t}:R>`;
         });
 
-      return interaction.editReply(
+      await sendLogSafe(
+        interaction,
+        `📌 **/pendientes usado**\n` +
+          `👤 Staff: ${interaction.user.tag} (${interaction.user.id})\n` +
+          `📍 Canal: <#${interaction.channelId}>\n` +
+          `🔢 Encontrados: ${pendientes.size}\n` +
+          `🕒 Hora: <t:${nowTs()}:f>`
+      );
+
+      if (pendientes.size === 0) {
+        return safeEdit(interaction, "✅ No hay pendientes de 5 días.");
+      }
+
+      return safeEdit(
+        interaction,
         `📌 **Pendientes (5 días):** ${pendientes.size}\n\n${list.join("\n")}`
       );
     }
 
     // ===== /limpiar_pendientes =====
     if (interaction.commandName === "limpiar_pendientes") {
-      await interaction.deferReply({ ephemeral: true });
+      await safeDefer(interaction);
 
       if (!(await invokerHasPermission(interaction))) {
-        return interaction.editReply("❌ No tienes permiso.");
+        return safeEdit(interaction, "❌ No tienes permiso.");
       }
 
-      const confirmar = interaction.options.getBoolean("confirmar", true);
-      await interaction.guild.members.fetch();
-
-      const pendientes = getPendientes(interaction.guild);
-
-      if (pendientes.size === 0) {
-        return interaction.editReply("✅ No hay nadie para expulsar.");
+      // 🔒 Lock anti-spam
+      const gid = interaction.guildId;
+      if (limpiarLocks.get(gid)) {
+        return safeEdit(interaction, "⏳ Ya hay una limpieza en proceso. Espera un momento y vuelve a intentar.");
       }
+      limpiarLocks.set(gid, true);
 
-      if (!confirmar) {
-        return interaction.editReply(
-          `⚠️ **Preview**: ${pendientes.size} personas serían expulsadas.\nUsa \`confirmar:true\` para ejecutar.`
+      try {
+        const confirmar = interaction.options.getBoolean("confirmar", true);
+        await interaction.guild.members.fetch();
+
+        const pendientes = getPendientes(interaction.guild);
+
+        await sendLogSafe(
+          interaction,
+          `🧹 **/limpiar_pendientes usado**\n` +
+            `👤 Staff: ${interaction.user.tag} (${interaction.user.id})\n` +
+            `📍 Canal: <#${interaction.channelId}>\n` +
+            `⚙️ Confirmar: ${confirmar}\n` +
+            `🔢 Pendientes detectados: ${pendientes.size}\n` +
+            `🕒 Hora: <t:${nowTs()}:f>`
         );
-      }
 
-      const me = await interaction.guild.members.fetchMe();
-      if (!me.permissions.has(PermissionsBitField.Flags.KickMembers)) {
-        return interaction.editReply("❌ No tengo permiso para expulsar.");
-      }
-
-      let kicked = 0;
-
-      for (const member of pendientes.values()) {
-        try {
-          if (member.kickable) {
-            await member.kick("No verificada después de 5 días");
-            kicked++;
-          }
-        } catch (e) {
-          console.error("Kick falló para:", member.user?.tag, e);
+        if (pendientes.size === 0) {
+          return safeEdit(interaction, "✅ No hay nadie para expulsar.");
         }
-      }
 
-      return interaction.editReply(
-        `🧹 Limpieza completa: **${kicked}** personas expulsadas.`
-      );
+        if (!confirmar) {
+          return safeEdit(
+            interaction,
+            `⚠️ **Preview**: ${pendientes.size} personas serían expulsadas.\nUsa \`confirmar:true\` para ejecutar.`
+          );
+        }
+
+        const me = await interaction.guild.members.fetchMe();
+        if (!me.permissions.has(PermissionsBitField.Flags.KickMembers)) {
+          return safeEdit(interaction, "❌ No tengo permiso para expulsar (Kick Members).");
+        }
+
+        let kicked = 0;
+        let failed = 0;
+
+        for (const member of pendientes.values()) {
+          try {
+            if (member.kickable) {
+              await member.kick("No verificada después de 5 días");
+              kicked++;
+            } else {
+              failed++;
+            }
+          } catch (e) {
+            failed++;
+            console.error("Kick falló para:", member.user?.tag, e?.message || e);
+          }
+        }
+
+        await sendLogSafe(
+          interaction,
+          `✅ **Limpieza terminada**\n` +
+            `👤 Staff: ${interaction.user.tag} (${interaction.user.id})\n` +
+            `🔢 Detectados: ${pendientes.size}\n` +
+            `👢 Expulsados: ${kicked}\n` +
+            `⚠️ Fallos/no kickable: ${failed}\n` +
+            `🕒 Hora: <t:${nowTs()}:f>`
+        );
+
+        return safeEdit(interaction, `🧹 Limpieza completa: **${kicked}** personas expulsadas.`);
+      } finally {
+        limpiarLocks.set(interaction.guildId, false);
+      }
     }
   } catch (err) {
-    console.error("❌ Error en interactionCreate:", err);
+    console.error("❌ Error en interactionCreate:", err?.message || err);
 
     try {
       if (interaction.isChatInputCommand()) {
@@ -319,3 +383,4 @@ process.on("uncaughtException", (err) => {
 
 // ===== LOGIN =====
 client.login(DISCORD_TOKEN);
+
