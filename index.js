@@ -93,13 +93,17 @@ client.once("ready", async () => {
 });
 
 // ===== HELPERS =====
+function sleep(ms) {
+  return new Promise((res) => setTimeout(res, ms));
+}
+
 async function invokerHasPermission(interaction) {
   if (!interaction.inGuild()) return false;
   const invoker = await interaction.guild.members.fetch(interaction.user.id);
   return invoker.roles.cache.some((r) => allowedRoleIds.includes(r.id));
 }
 
-function getPendientes(guild) {
+function getPendientesFromCache(guild) {
   const FIVE_DAYS = 5 * 24 * 60 * 60 * 1000;
   const cutoff = Date.now() - FIVE_DAYS;
 
@@ -107,49 +111,69 @@ function getPendientes(guild) {
     if (m.user.bot) return false;
     if (!m.roles.cache.has(NO_VERIFICADAS_ROLE_ID)) return false;
     if (!m.joinedAt) return false;
-    return m.joinedAt.getTime() <= cutoff; // 5 días o más
+    return m.joinedAt.getTime() <= cutoff; // 5 o más días
   });
 }
 
-// Nunca dejes que un fallo de logs rompa el comando
-async function sendLogSafe(interaction, content) {
-  if (!LOG_CHANNEL_ID) return;
+// ✅ manda log y si falla, regresa el error (para mostrártelo)
+async function sendLog(interaction, content) {
+  if (!LOG_CHANNEL_ID) return { ok: false, error: "LOG_CHANNEL_ID no configurado" };
 
   try {
-    const logChannel = await interaction.guild.channels.fetch(LOG_CHANNEL_ID).catch(() => null);
-    if (!logChannel || !logChannel.isTextBased()) return;
+    const logChannel = await interaction.guild.channels.fetch(LOG_CHANNEL_ID);
+
+    if (!logChannel) return { ok: false, error: "No se encontró el canal de logs" };
+    if (!logChannel.isTextBased()) return { ok: false, error: "El canal de logs no es de texto" };
 
     await logChannel.send({ content, allowedMentions: { parse: [] } });
+    return { ok: true };
   } catch (e) {
-    console.error("❌ Error enviando log:", e?.message || e);
+    console.error("❌ Error enviando log:", e);
+    return { ok: false, error: e?.code || e?.message || "Error desconocido" };
   }
 }
 
-function nowTs() {
-  return Math.floor(Date.now() / 1000);
-}
+/**
+ * ✅ FIX PRINCIPAL: NO spamear guild.members.fetch()
+ * - Cooldown de 10 min (ajústalo si quieres)
+ * - Lock: si ya hay un fetch corriendo, lo reutiliza
+ * - Si Discord rate limita, lanza error “cooldown” para avisar al staff
+ */
+const FETCH_COOLDOWN_MS = 10 * 60 * 1000; // 10 minutos
+let lastFetchAt = 0;
+let fetchingPromise = null;
 
-// Respuesta segura (evita “Unknown interaction” si alguien spamea)
-async function safeDefer(interaction) {
-  try {
-    if (!interaction.deferred && !interaction.replied) {
-      await interaction.deferReply({ ephemeral: true });
-    }
-  } catch {}
-}
-async function safeEdit(interaction, content) {
-  try {
-    if (interaction.deferred || interaction.replied) {
-      return await interaction.editReply(content);
-    }
-    return await interaction.reply({ content, ephemeral: true });
-  } catch (e) {
-    console.error("❌ safeEdit error:", e?.message || e);
-  }
-}
+async function ensureMembersFetched(guild) {
+  const now = Date.now();
 
-// ✅ Lock anti-spam por guild (para /limpiar_pendientes)
-const limpiarLocks = new Map(); // guildId -> boolean
+  // si el cache está “reciente”, no hacemos fetch
+  if (now - lastFetchAt < FETCH_COOLDOWN_MS) return;
+
+  // si ya hay fetch corriendo, esperar ese mismo
+  if (fetchingPromise) return fetchingPromise;
+
+  fetchingPromise = (async () => {
+    try {
+      await guild.members.fetch(); // opcode 8
+      lastFetchAt = Date.now();
+    } catch (e) {
+      // Rate limit / gateway busy -> avisar con mensaje claro
+      const retry =
+        (typeof e?.retry_after === "number" ? e.retry_after : null) ||
+        (typeof e?.data?.retry_after === "number" ? e.data.retry_after : null);
+
+      if (retry) {
+        const sec = Math.ceil(retry / 1000);
+        throw new Error(`RATE_LIMIT_FETCH:${sec}`);
+      }
+      throw e;
+    } finally {
+      fetchingPromise = null;
+    }
+  })();
+
+  return fetchingPromise;
+}
 
 // ===== INTERACTIONS =====
 client.on("interactionCreate", async (interaction) => {
@@ -159,16 +183,16 @@ client.on("interactionCreate", async (interaction) => {
 
     // ===== /say =====
     if (interaction.commandName === "say") {
-      await safeDefer(interaction);
+      await interaction.deferReply({ ephemeral: true });
 
       if (!(await invokerHasPermission(interaction))) {
-        return safeEdit(interaction, "❌ No tienes permiso.");
+        return interaction.editReply("❌ No tienes permiso.");
       }
 
       const texto = interaction.options.getString("mensaje", true);
 
       if (texto.includes("@everyone") || texto.includes("@here")) {
-        return safeEdit(interaction, "❌ No se permite usar @everyone/@here con /say.");
+        return interaction.editReply("❌ No se permite usar @everyone/@here con /say.");
       }
 
       const sentMessage = await interaction.channel.send({
@@ -178,46 +202,55 @@ client.on("interactionCreate", async (interaction) => {
 
       const jumpLink = `https://discord.com/channels/${interaction.guildId}/${interaction.channelId}/${sentMessage.id}`;
 
-      await sendLogSafe(
-        interaction,
+      const logText =
         `📝 **/say usado**\n` +
-          `👤 Usuario: ${interaction.user.tag} (${interaction.user.id})\n` +
-          `📍 Canal: <#${interaction.channelId}>\n` +
-          `🔗 Link: ${jumpLink}\n` +
-          `🕒 Hora: <t:${nowTs()}:f>\n` +
-          `💬 Mensaje:\n>>> ${texto}`
-      );
+        `👤 Usuario: ${interaction.user.tag} (${interaction.user.id})\n` +
+        `📍 Canal: <#${interaction.channelId}>\n` +
+        `🔗 Link: ${jumpLink}\n` +
+        `🕒 Hora: <t:${Math.floor(Date.now() / 1000)}:f>\n` +
+        `💬 Mensaje:\n>>> ${texto}`;
 
-      return safeEdit(interaction, "✅ Mensaje enviado.");
+      const res = await sendLog(interaction, logText);
+
+      if (!res.ok) {
+        await interaction.followUp({
+          content: `⚠️ Se envió el mensaje, pero NO pude mandar el log. Error: **${res.error}**`,
+          ephemeral: true,
+        });
+      }
+
+      return interaction.editReply("✅ Mensaje enviado.");
     }
 
     // ===== /girls =====
     if (interaction.commandName === "girls") {
-      await safeDefer(interaction);
+      await interaction.deferReply({ ephemeral: true });
 
       if (!(await invokerHasPermission(interaction))) {
-        return safeEdit(interaction, "❌ No tienes permiso.");
+        return interaction.editReply("❌ No tienes permiso.");
       }
 
       const member = interaction.options.getMember("usuario");
-      const girlsRole = interaction.guild.roles.cache.find((r) => r.name === GIRLS_ROLE_NAME);
+      const girlsRole = interaction.guild.roles.cache.find(
+        (r) => r.name === GIRLS_ROLE_NAME
+      );
 
       if (!member || !girlsRole) {
-        return safeEdit(interaction, "❌ Error obteniendo usuario o rol.");
+        return interaction.editReply("❌ Error obteniendo usuario o rol.");
       }
 
       const me = await interaction.guild.members.fetchMe();
 
       if (!me.permissions.has(PermissionsBitField.Flags.ManageRoles)) {
-        return safeEdit(interaction, "❌ No tengo permiso Manage Roles.");
+        return interaction.editReply("❌ No tengo permiso Manage Roles.");
       }
 
       if (me.roles.highest.position <= girlsRole.position) {
-        return safeEdit(interaction, "❌ Mi rol debe estar arriba de Girls.");
+        return interaction.editReply("❌ Mi rol debe estar arriba de Girls.");
       }
 
       if (member.roles.cache.has(girlsRole.id)) {
-        return safeEdit(interaction, "ℹ️ Ya tiene Girls.");
+        return interaction.editReply("ℹ️ Ya tiene Girls.");
       }
 
       await member.roles.add(girlsRole);
@@ -226,31 +259,43 @@ client.on("interactionCreate", async (interaction) => {
         await member.roles.remove(NO_VERIFICADAS_ROLE_ID);
       }
 
-      await sendLogSafe(
+      // log
+      await sendLog(
         interaction,
-        `✅ **/girls usado**\n` +
-          `👤 Staff: ${interaction.user.tag} (${interaction.user.id})\n` +
-          `🎯 Usuario: ${member.user.tag} (${member.user.id})\n` +
-          `📍 Canal: <#${interaction.channelId}>\n` +
-          `🕒 Hora: <t:${nowTs()}:f>`
+        `✅ **/girls usado**\n👤 Staff: ${interaction.user.tag} (${interaction.user.id})\n🎯 Usuario: ${member.user.tag} (${member.id})\n🕒 <t:${Math.floor(Date.now() / 1000)}:f>`
       );
 
-      return safeEdit(
-        interaction,
+      return interaction.editReply(
         `✅ ${member} verificada: **Girls** asignado y **no verificadas** removido.`
       );
     }
 
     // ===== /pendientes =====
     if (interaction.commandName === "pendientes") {
-      await safeDefer(interaction);
+      await interaction.deferReply({ ephemeral: true });
 
       if (!(await invokerHasPermission(interaction))) {
-        return safeEdit(interaction, "❌ No tienes permiso.");
+        return interaction.editReply("❌ No tienes permiso.");
       }
 
-      await interaction.guild.members.fetch();
-      const pendientes = getPendientes(interaction.guild);
+      // ✅ fetch con cooldown para evitar opcode 8 rate limit
+      try {
+        await ensureMembersFetched(interaction.guild);
+      } catch (e) {
+        if (String(e.message || "").startsWith("RATE_LIMIT_FETCH:")) {
+          const sec = e.message.split(":")[1] || "unos";
+          return interaction.editReply(
+            `⏳ Discord me rate-limitó al cargar miembros. Intenta otra vez en **${sec} segundos**.`
+          );
+        }
+        throw e;
+      }
+
+      const pendientes = getPendientesFromCache(interaction.guild);
+
+      if (pendientes.size === 0) {
+        return interaction.editReply("✅ No hay pendientes de 5 días.");
+      }
 
       const list = [...pendientes.values()]
         .sort((a, b) => a.joinedAt - b.joinedAt)
@@ -260,106 +305,91 @@ client.on("interactionCreate", async (interaction) => {
           return `${i + 1}. ${m} — entró <t:${t}:R>`;
         });
 
-      await sendLogSafe(
+      await sendLog(
         interaction,
-        `📌 **/pendientes usado**\n` +
-          `👤 Staff: ${interaction.user.tag} (${interaction.user.id})\n` +
-          `📍 Canal: <#${interaction.channelId}>\n` +
-          `🔢 Encontrados: ${pendientes.size}\n` +
-          `🕒 Hora: <t:${nowTs()}:f>`
+        `📌 **/pendientes usado**\n👤 Staff: ${interaction.user.tag} (${interaction.user.id})\n📊 Encontrados: ${pendientes.size}\n🕒 <t:${Math.floor(Date.now() / 1000)}:f>`
       );
 
-      if (pendientes.size === 0) {
-        return safeEdit(interaction, "✅ No hay pendientes de 5 días.");
-      }
-
-      return safeEdit(
-        interaction,
+      return interaction.editReply(
         `📌 **Pendientes (5 días):** ${pendientes.size}\n\n${list.join("\n")}`
       );
     }
 
     // ===== /limpiar_pendientes =====
     if (interaction.commandName === "limpiar_pendientes") {
-      await safeDefer(interaction);
+      await interaction.deferReply({ ephemeral: true });
 
       if (!(await invokerHasPermission(interaction))) {
-        return safeEdit(interaction, "❌ No tienes permiso.");
+        return interaction.editReply("❌ No tienes permiso.");
       }
 
-      // 🔒 Lock anti-spam
-      const gid = interaction.guildId;
-      if (limpiarLocks.get(gid)) {
-        return safeEdit(interaction, "⏳ Ya hay una limpieza en proceso. Espera un momento y vuelve a intentar.");
-      }
-      limpiarLocks.set(gid, true);
+      const confirmar = interaction.options.getBoolean("confirmar", true);
 
+      // ✅ fetch con cooldown para evitar opcode 8 rate limit
       try {
-        const confirmar = interaction.options.getBoolean("confirmar", true);
-        await interaction.guild.members.fetch();
-
-        const pendientes = getPendientes(interaction.guild);
-
-        await sendLogSafe(
-          interaction,
-          `🧹 **/limpiar_pendientes usado**\n` +
-            `👤 Staff: ${interaction.user.tag} (${interaction.user.id})\n` +
-            `📍 Canal: <#${interaction.channelId}>\n` +
-            `⚙️ Confirmar: ${confirmar}\n` +
-            `🔢 Pendientes detectados: ${pendientes.size}\n` +
-            `🕒 Hora: <t:${nowTs()}:f>`
-        );
-
-        if (pendientes.size === 0) {
-          return safeEdit(interaction, "✅ No hay nadie para expulsar.");
-        }
-
-        if (!confirmar) {
-          return safeEdit(
-            interaction,
-            `⚠️ **Preview**: ${pendientes.size} personas serían expulsadas.\nUsa \`confirmar:true\` para ejecutar.`
+        await ensureMembersFetched(interaction.guild);
+      } catch (e) {
+        if (String(e.message || "").startsWith("RATE_LIMIT_FETCH:")) {
+          const sec = e.message.split(":")[1] || "unos";
+          return interaction.editReply(
+            `⏳ Discord me rate-limitó al cargar miembros. Intenta otra vez en **${sec} segundos**.`
           );
         }
+        throw e;
+      }
 
-        const me = await interaction.guild.members.fetchMe();
-        if (!me.permissions.has(PermissionsBitField.Flags.KickMembers)) {
-          return safeEdit(interaction, "❌ No tengo permiso para expulsar (Kick Members).");
-        }
+      const pendientes = getPendientesFromCache(interaction.guild);
 
-        let kicked = 0;
-        let failed = 0;
+      if (pendientes.size === 0) {
+        return interaction.editReply("✅ No hay nadie para expulsar.");
+      }
 
-        for (const member of pendientes.values()) {
-          try {
-            if (member.kickable) {
-              await member.kick("No verificada después de 5 días");
-              kicked++;
-            } else {
-              failed++;
-            }
-          } catch (e) {
-            failed++;
-            console.error("Kick falló para:", member.user?.tag, e?.message || e);
-          }
-        }
-
-        await sendLogSafe(
+      if (!confirmar) {
+        await sendLog(
           interaction,
-          `✅ **Limpieza terminada**\n` +
-            `👤 Staff: ${interaction.user.tag} (${interaction.user.id})\n` +
-            `🔢 Detectados: ${pendientes.size}\n` +
-            `👢 Expulsados: ${kicked}\n` +
-            `⚠️ Fallos/no kickable: ${failed}\n` +
-            `🕒 Hora: <t:${nowTs()}:f>`
+          `⚠️ **Preview /limpiar_pendientes**\n👤 Staff: ${interaction.user.tag} (${interaction.user.id})\n📊 Serían expulsadas: ${pendientes.size}\n🕒 <t:${Math.floor(Date.now() / 1000)}:f>`
         );
 
-        return safeEdit(interaction, `🧹 Limpieza completa: **${kicked}** personas expulsadas.`);
-      } finally {
-        limpiarLocks.set(interaction.guildId, false);
+        return interaction.editReply(
+          `⚠️ **Preview**: ${pendientes.size} personas serían expulsadas.\nUsa \`confirmar:true\` para ejecutar.`
+        );
       }
+
+      const me = await interaction.guild.members.fetchMe();
+      if (!me.permissions.has(PermissionsBitField.Flags.KickMembers)) {
+        return interaction.editReply("❌ No tengo permiso para expulsar (Kick Members).");
+      }
+
+      let kicked = 0;
+      let failed = 0;
+
+      // ✅ Delay entre kicks para evitar rate limit de Discord
+      for (const member of pendientes.values()) {
+        try {
+          if (member.kickable) {
+            await member.kick("No verificada después de 5 días");
+            kicked++;
+            await sleep(1200); // 1.2s entre kicks (ajusta si quieres)
+          } else {
+            failed++;
+          }
+        } catch (e) {
+          failed++;
+          await sleep(1200);
+        }
+      }
+
+      await sendLog(
+        interaction,
+        `🧹 **/limpiar_pendientes ejecutado**\n👤 Staff: ${interaction.user.tag} (${interaction.user.id})\n✅ Expulsadas: ${kicked}\n⚠️ Fallidas/no kickable: ${failed}\n🕒 <t:${Math.floor(Date.now() / 1000)}:f>`
+      );
+
+      return interaction.editReply(
+        `🧹 Limpieza completa: **${kicked}** personas expulsadas.${failed ? ` (⚠️ ${failed} no se pudieron expulsar)` : ""}`
+      );
     }
   } catch (err) {
-    console.error("❌ Error en interactionCreate:", err?.message || err);
+    console.error("❌ Error en interactionCreate:", err);
 
     try {
       if (interaction.isChatInputCommand()) {
@@ -383,4 +413,3 @@ process.on("uncaughtException", (err) => {
 
 // ===== LOGIN =====
 client.login(DISCORD_TOKEN);
-
