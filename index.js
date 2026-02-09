@@ -7,12 +7,12 @@ const {
   SlashCommandBuilder,
 } = require("discord.js");
 
-const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
-const CLIENT_ID = process.env.CLIENT_ID;
-const GUILD_ID = process.env.GUILD_ID;
+const DISCORD_TOKEN = (process.env.DISCORD_TOKEN || "").trim();
+const CLIENT_ID = (process.env.CLIENT_ID || "").trim();
+const GUILD_ID = (process.env.GUILD_ID || "").trim();
 
 // ✅ Canal privado para logs (Railway)
-const LOG_CHANNEL_ID = process.env.LOG_CHANNEL_ID;
+const LOG_CHANNEL_ID = (process.env.LOG_CHANNEL_ID || "").trim();
 
 // ===== CONFIG =====
 const NO_VERIFICADAS_ROLE_ID = "996592241260888095";
@@ -21,8 +21,8 @@ const GIRLS_ROLE_NAME = "﹒╴girls ღﾟ˚̣̣̣";
 const allowedRoleIds = [
   "1447179100551905321", // Admin
   "1222199503873114175", // Mod
-  "996585466197454929", // Helper
-  "997485830341918730", // Owner
+  "996585466197454929",  // Helper
+  "997485830341918730",  // Owner
 ];
 
 // ===== CLIENT =====
@@ -77,17 +77,25 @@ const bienvenidaCommand = new SlashCommandBuilder()
   );
 
 // ===== REGISTER =====
+// ✅ FIX: borrar y re-registrar comandos del guild para romper cache de Discord
 async function registerCommands() {
   const rest = new REST({ version: "10" }).setToken(DISCORD_TOKEN);
-  await rest.put(Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID), {
-    body: [
-      girlsCommand,
-      pendientesCommand,
-      limpiarCommand,
-      sayCommand,
-      bienvenidaCommand, // ✅ agregado
-    ].map((c) => c.toJSON()),
-  });
+
+  const commands = [
+    girlsCommand,
+    pendientesCommand,
+    limpiarCommand,
+    sayCommand,
+    bienvenidaCommand,
+  ].map((c) => c.toJSON());
+
+  console.log("🧹 Borrando comandos del guild...");
+  await rest.put(Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID), { body: [] });
+
+  console.log("✅ Comandos borrados. Re-registrando...");
+  await rest.put(Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID), { body: commands });
+
+  console.log("🎉 Comandos re-registrados correctamente.");
 }
 
 client.once("ready", async () => {
@@ -132,16 +140,13 @@ function getPendientesFromCache(guild) {
 
 // ✅ manda log y si falla, regresa el error (para mostrártelo)
 async function sendLog(interaction, content) {
-  if (!LOG_CHANNEL_ID)
-    return { ok: false, error: "LOG_CHANNEL_ID no configurado" };
+  if (!LOG_CHANNEL_ID) return { ok: false, error: "LOG_CHANNEL_ID no configurado" };
 
   try {
     const logChannel = await interaction.guild.channels.fetch(LOG_CHANNEL_ID);
 
-    if (!logChannel)
-      return { ok: false, error: "No se encontró el canal de logs" };
-    if (!logChannel.isTextBased())
-      return { ok: false, error: "El canal de logs no es de texto" };
+    if (!logChannel) return { ok: false, error: "No se encontró el canal de logs" };
+    if (!logChannel.isTextBased()) return { ok: false, error: "El canal de logs no es de texto" };
 
     await logChannel.send({ content, allowedMentions: { parse: [] } });
     return { ok: true };
@@ -210,9 +215,7 @@ client.on("interactionCreate", async (interaction) => {
       const texto = interaction.options.getString("mensaje", true);
 
       if (texto.includes("@everyone") || texto.includes("@here")) {
-        return interaction.editReply(
-          "❌ No se permite usar @everyone/@here con /say."
-        );
+        return interaction.editReply("❌ No se permite usar @everyone/@here con /say.");
       }
 
       const sentMessage = await interaction.channel.send({
@@ -258,18 +261,20 @@ client.on("interactionCreate", async (interaction) => {
       const DUDAS_CH = "1252395723262001152";
       const CHARLA_CH = "989867080595701790";
 
-      const texto = `Listo ${user} ya has sido verificada, espero y disfrutes tu estancia en el servidor 🐱
-Te invito a pasarte por <#${ROLES_CH}> para llenar datos de tu perfil. ‼️
-Te esperamos con tu <#${PRESENTACION_CH}> para conocerte mejor ‼️
-Si tienes dudas o sugerencias puedes dejarlas por aquí <#${DUDAS_CH}> ‼️
-Ven a saludar y platicar con nosotros en <#${CHARLA_CH}> 🐱`;
+const texto =
+`Listo ${user} ya has sido verificada, espero y disfrutes tu estancia en el servidor <:01_lumi_corazon:1435352473543114832>
+Te invito a pasarte por <#${ROLES_CH}> para llenar datos de tu perfil <:00_lumi_aww:1433442969662263427>
+Te esperamos con tu <#${PRESENTACION_CH}> para conocerte mejor‼️
+Si tienes dudas o sugerencias puedes dejarlas por aquí <#${DUDAS_CH}> 
+Ven a saludar y platicar con nosotros en <#${CHARLA_CH}> <:00_lumi_corazon:1433443102189813771>`;
+
 
       const sentMessage = await interaction.channel.send({
         content: texto,
         allowedMentions: {
-          users: [user.id], // ✅ solo menciona a esa usuaria
+          users: [user.id],
           roles: [],
-          parse: [], // ✅ evita @everyone/@here y menciones inesperadas
+          parse: [],
           repliedUser: false,
         },
       });
@@ -305,9 +310,7 @@ Ven a saludar y platicar con nosotros en <#${CHARLA_CH}> 🐱`;
       }
 
       const member = interaction.options.getMember("usuario");
-      const girlsRole = interaction.guild.roles.cache.find(
-        (r) => r.name === GIRLS_ROLE_NAME
-      );
+      const girlsRole = interaction.guild.roles.cache.find((r) => r.name === GIRLS_ROLE_NAME);
 
       if (!member || !girlsRole) {
         return interaction.editReply("❌ Error obteniendo usuario o rol.");
@@ -336,9 +339,7 @@ Ven a saludar y platicar con nosotros en <#${CHARLA_CH}> 🐱`;
       // log
       await sendLog(
         interaction,
-        `✅ **/girls usado**\n👤 Staff: ${interaction.user.tag} (${interaction.user.id})\n🎯 Usuario: ${member.user.tag} (${member.id})\n🕒 <t:${Math.floor(
-          Date.now() / 1000
-        )}:f>`
+        `✅ **/girls usado**\n👤 Staff: ${interaction.user.tag} (${interaction.user.id})\n🎯 Usuario: ${member.user.tag} (${member.id})\n🕒 <t:${Math.floor(Date.now() / 1000)}:f>`
       );
 
       return interaction.editReply(
@@ -383,9 +384,7 @@ Ven a saludar y platicar con nosotros en <#${CHARLA_CH}> 🐱`;
 
       await sendLog(
         interaction,
-        `📌 **/pendientes usado**\n👤 Staff: ${interaction.user.tag} (${interaction.user.id})\n📊 Encontrados: ${pendientes.size}\n🕒 <t:${Math.floor(
-          Date.now() / 1000
-        )}:f>`
+        `📌 **/pendientes usado**\n👤 Staff: ${interaction.user.tag} (${interaction.user.id})\n📊 Encontrados: ${pendientes.size}\n🕒 <t:${Math.floor(Date.now() / 1000)}:f>`
       );
 
       return interaction.editReply(
@@ -425,9 +424,7 @@ Ven a saludar y platicar con nosotros en <#${CHARLA_CH}> 🐱`;
       if (!confirmar) {
         await sendLog(
           interaction,
-          `⚠️ **Preview /limpiar_pendientes**\n👤 Staff: ${interaction.user.tag} (${interaction.user.id})\n📊 Serían expulsadas: ${pendientes.size}\n🕒 <t:${Math.floor(
-            Date.now() / 1000
-          )}:f>`
+          `⚠️ **Preview /limpiar_pendientes**\n👤 Staff: ${interaction.user.tag} (${interaction.user.id})\n📊 Serían expulsadas: ${pendientes.size}\n🕒 <t:${Math.floor(Date.now() / 1000)}:f>`
         );
 
         return interaction.editReply(
@@ -437,9 +434,7 @@ Ven a saludar y platicar con nosotros en <#${CHARLA_CH}> 🐱`;
 
       const me = await interaction.guild.members.fetchMe();
       if (!me.permissions.has(PermissionsBitField.Flags.KickMembers)) {
-        return interaction.editReply(
-          "❌ No tengo permiso para expulsar (Kick Members)."
-        );
+        return interaction.editReply("❌ No tengo permiso para expulsar (Kick Members).");
       }
 
       let kicked = 0;
@@ -451,7 +446,7 @@ Ven a saludar y platicar con nosotros en <#${CHARLA_CH}> 🐱`;
           if (member.kickable) {
             await member.kick("No verificada después de 5 días");
             kicked++;
-            await sleep(1200); // 1.2s entre kicks (ajusta si quieres)
+            await sleep(1200);
           } else {
             failed++;
           }
@@ -463,15 +458,11 @@ Ven a saludar y platicar con nosotros en <#${CHARLA_CH}> 🐱`;
 
       await sendLog(
         interaction,
-        `🧹 **/limpiar_pendientes ejecutado**\n👤 Staff: ${interaction.user.tag} (${interaction.user.id})\n✅ Expulsadas: ${kicked}\n⚠️ Fallidas/no kickable: ${failed}\n🕒 <t:${Math.floor(
-          Date.now() / 1000
-        )}:f>`
+        `🧹 **/limpiar_pendientes ejecutado**\n👤 Staff: ${interaction.user.tag} (${interaction.user.id})\n✅ Expulsadas: ${kicked}\n⚠️ Fallidas/no kickable: ${failed}\n🕒 <t:${Math.floor(Date.now() / 1000)}:f>`
       );
 
       return interaction.editReply(
-        `🧹 Limpieza completa: **${kicked}** personas expulsadas.${
-          failed ? ` (⚠️ ${failed} no se pudieron expulsar)` : ""
-        }`
+        `🧹 Limpieza completa: **${kicked}** personas expulsadas.${failed ? ` (⚠️ ${failed} no se pudieron expulsar)` : ""}`
       );
     }
   } catch (err) {
@@ -480,10 +471,7 @@ Ven a saludar y platicar con nosotros en <#${CHARLA_CH}> 🐱`;
     try {
       if (interaction.isChatInputCommand()) {
         if (!interaction.deferred && !interaction.replied) {
-          await interaction.reply({
-            content: "❌ Error interno del bot.",
-            ephemeral: true,
-          });
+          await interaction.reply({ content: "❌ Error interno del bot.", ephemeral: true });
         } else {
           await interaction.editReply("❌ Error interno del bot.");
         }
@@ -502,3 +490,4 @@ process.on("uncaughtException", (err) => {
 
 // ===== LOGIN =====
 client.login(DISCORD_TOKEN);
+
