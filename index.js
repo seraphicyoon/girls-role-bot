@@ -21,8 +21,8 @@ const GIRLS_ROLE_NAME = "﹒╴girls ღﾟ˚̣̣̣";
 const allowedRoleIds = [
   "1447179100551905321", // Admin
   "1222199503873114175", // Mod
-  "996585466197454929",  // Helper
-  "997485830341918730",  // Owner
+  "996585466197454929", // Helper
+  "997485830341918730", // Owner
 ];
 
 // ===== CLIENT =====
@@ -65,13 +65,28 @@ const sayCommand = new SlashCommandBuilder()
       .setRequired(true)
   );
 
+// ✅ NUEVO: /bienvenida
+const bienvenidaCommand = new SlashCommandBuilder()
+  .setName("bienvenida")
+  .setDescription("Envía el mensaje de verificación/bienvenida a una usuaria")
+  .addUserOption((option) =>
+    option
+      .setName("usuario")
+      .setDescription("Usuaria a la que se le enviará la bienvenida")
+      .setRequired(true)
+  );
+
 // ===== REGISTER =====
 async function registerCommands() {
   const rest = new REST({ version: "10" }).setToken(DISCORD_TOKEN);
   await rest.put(Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID), {
-    body: [girlsCommand, pendientesCommand, limpiarCommand, sayCommand].map((c) =>
-      c.toJSON()
-    ),
+    body: [
+      girlsCommand,
+      pendientesCommand,
+      limpiarCommand,
+      sayCommand,
+      bienvenidaCommand, // ✅ agregado
+    ].map((c) => c.toJSON()),
   });
 }
 
@@ -117,13 +132,16 @@ function getPendientesFromCache(guild) {
 
 // ✅ manda log y si falla, regresa el error (para mostrártelo)
 async function sendLog(interaction, content) {
-  if (!LOG_CHANNEL_ID) return { ok: false, error: "LOG_CHANNEL_ID no configurado" };
+  if (!LOG_CHANNEL_ID)
+    return { ok: false, error: "LOG_CHANNEL_ID no configurado" };
 
   try {
     const logChannel = await interaction.guild.channels.fetch(LOG_CHANNEL_ID);
 
-    if (!logChannel) return { ok: false, error: "No se encontró el canal de logs" };
-    if (!logChannel.isTextBased()) return { ok: false, error: "El canal de logs no es de texto" };
+    if (!logChannel)
+      return { ok: false, error: "No se encontró el canal de logs" };
+    if (!logChannel.isTextBased())
+      return { ok: false, error: "El canal de logs no es de texto" };
 
     await logChannel.send({ content, allowedMentions: { parse: [] } });
     return { ok: true };
@@ -192,7 +210,9 @@ client.on("interactionCreate", async (interaction) => {
       const texto = interaction.options.getString("mensaje", true);
 
       if (texto.includes("@everyone") || texto.includes("@here")) {
-        return interaction.editReply("❌ No se permite usar @everyone/@here con /say.");
+        return interaction.editReply(
+          "❌ No se permite usar @everyone/@here con /say."
+        );
       }
 
       const sentMessage = await interaction.channel.send({
@@ -220,6 +240,60 @@ client.on("interactionCreate", async (interaction) => {
       }
 
       return interaction.editReply("✅ Mensaje enviado.");
+    }
+
+    // ===== /bienvenida =====
+    if (interaction.commandName === "bienvenida") {
+      await interaction.deferReply({ ephemeral: true });
+
+      if (!(await invokerHasPermission(interaction))) {
+        return interaction.editReply("❌ No tienes permiso.");
+      }
+
+      const user = interaction.options.getUser("usuario", true);
+
+      // IDs de tus canales fijos
+      const ROLES_CH = "1097575701739216947";
+      const PRESENTACION_CH = "989867122605817887";
+      const DUDAS_CH = "1252395723262001152";
+      const CHARLA_CH = "989867080595701790";
+
+      const texto = `Listo ${user} ya has sido verificada, espero y disfrutes tu estancia en el servidor 🐱
+Te invito a pasarte por <#${ROLES_CH}> para llenar datos de tu perfil. ‼️
+Te esperamos con tu <#${PRESENTACION_CH}> para conocerte mejor ‼️
+Si tienes dudas o sugerencias puedes dejarlas por aquí <#${DUDAS_CH}> ‼️
+Ven a saludar y platicar con nosotros en <#${CHARLA_CH}> 🐱`;
+
+      const sentMessage = await interaction.channel.send({
+        content: texto,
+        allowedMentions: {
+          users: [user.id], // ✅ solo menciona a esa usuaria
+          roles: [],
+          parse: [], // ✅ evita @everyone/@here y menciones inesperadas
+          repliedUser: false,
+        },
+      });
+
+      const jumpLink = `https://discord.com/channels/${interaction.guildId}/${interaction.channelId}/${sentMessage.id}`;
+
+      const logText =
+        `💌 **/bienvenida usado**\n` +
+        `👤 Staff: ${interaction.user.tag} (${interaction.user.id})\n` +
+        `🎯 Usuario: ${user.tag} (${user.id})\n` +
+        `📍 Canal: <#${interaction.channelId}>\n` +
+        `🔗 Link: ${jumpLink}\n` +
+        `🕒 Hora: <t:${Math.floor(Date.now() / 1000)}:f>`;
+
+      const res = await sendLog(interaction, logText);
+
+      if (!res.ok) {
+        await interaction.followUp({
+          content: `⚠️ Se envió el mensaje, pero NO pude mandar el log. Error: **${res.error}**`,
+          ephemeral: true,
+        });
+      }
+
+      return interaction.editReply("✅ Bienvenida enviada.");
     }
 
     // ===== /girls =====
@@ -262,7 +336,9 @@ client.on("interactionCreate", async (interaction) => {
       // log
       await sendLog(
         interaction,
-        `✅ **/girls usado**\n👤 Staff: ${interaction.user.tag} (${interaction.user.id})\n🎯 Usuario: ${member.user.tag} (${member.id})\n🕒 <t:${Math.floor(Date.now() / 1000)}:f>`
+        `✅ **/girls usado**\n👤 Staff: ${interaction.user.tag} (${interaction.user.id})\n🎯 Usuario: ${member.user.tag} (${member.id})\n🕒 <t:${Math.floor(
+          Date.now() / 1000
+        )}:f>`
       );
 
       return interaction.editReply(
@@ -307,7 +383,9 @@ client.on("interactionCreate", async (interaction) => {
 
       await sendLog(
         interaction,
-        `📌 **/pendientes usado**\n👤 Staff: ${interaction.user.tag} (${interaction.user.id})\n📊 Encontrados: ${pendientes.size}\n🕒 <t:${Math.floor(Date.now() / 1000)}:f>`
+        `📌 **/pendientes usado**\n👤 Staff: ${interaction.user.tag} (${interaction.user.id})\n📊 Encontrados: ${pendientes.size}\n🕒 <t:${Math.floor(
+          Date.now() / 1000
+        )}:f>`
       );
 
       return interaction.editReply(
@@ -347,7 +425,9 @@ client.on("interactionCreate", async (interaction) => {
       if (!confirmar) {
         await sendLog(
           interaction,
-          `⚠️ **Preview /limpiar_pendientes**\n👤 Staff: ${interaction.user.tag} (${interaction.user.id})\n📊 Serían expulsadas: ${pendientes.size}\n🕒 <t:${Math.floor(Date.now() / 1000)}:f>`
+          `⚠️ **Preview /limpiar_pendientes**\n👤 Staff: ${interaction.user.tag} (${interaction.user.id})\n📊 Serían expulsadas: ${pendientes.size}\n🕒 <t:${Math.floor(
+            Date.now() / 1000
+          )}:f>`
         );
 
         return interaction.editReply(
@@ -357,7 +437,9 @@ client.on("interactionCreate", async (interaction) => {
 
       const me = await interaction.guild.members.fetchMe();
       if (!me.permissions.has(PermissionsBitField.Flags.KickMembers)) {
-        return interaction.editReply("❌ No tengo permiso para expulsar (Kick Members).");
+        return interaction.editReply(
+          "❌ No tengo permiso para expulsar (Kick Members)."
+        );
       }
 
       let kicked = 0;
@@ -381,11 +463,15 @@ client.on("interactionCreate", async (interaction) => {
 
       await sendLog(
         interaction,
-        `🧹 **/limpiar_pendientes ejecutado**\n👤 Staff: ${interaction.user.tag} (${interaction.user.id})\n✅ Expulsadas: ${kicked}\n⚠️ Fallidas/no kickable: ${failed}\n🕒 <t:${Math.floor(Date.now() / 1000)}:f>`
+        `🧹 **/limpiar_pendientes ejecutado**\n👤 Staff: ${interaction.user.tag} (${interaction.user.id})\n✅ Expulsadas: ${kicked}\n⚠️ Fallidas/no kickable: ${failed}\n🕒 <t:${Math.floor(
+          Date.now() / 1000
+        )}:f>`
       );
 
       return interaction.editReply(
-        `🧹 Limpieza completa: **${kicked}** personas expulsadas.${failed ? ` (⚠️ ${failed} no se pudieron expulsar)` : ""}`
+        `🧹 Limpieza completa: **${kicked}** personas expulsadas.${
+          failed ? ` (⚠️ ${failed} no se pudieron expulsar)` : ""
+        }`
       );
     }
   } catch (err) {
@@ -394,7 +480,10 @@ client.on("interactionCreate", async (interaction) => {
     try {
       if (interaction.isChatInputCommand()) {
         if (!interaction.deferred && !interaction.replied) {
-          await interaction.reply({ content: "❌ Error interno del bot.", ephemeral: true });
+          await interaction.reply({
+            content: "❌ Error interno del bot.",
+            ephemeral: true,
+          });
         } else {
           await interaction.editReply("❌ Error interno del bot.");
         }
