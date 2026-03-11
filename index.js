@@ -54,6 +54,25 @@ function guardarInteracciones() {
   fs.writeFileSync(INTER_DB_FILE, JSON.stringify(interacciones, null, 2), "utf8");
 }
 
+// ===== ARCHIVO PARA GIFS DE BOOSTERS =====
+const GIFS_DB_FILE = path.join(__dirname, "gifs_booster.json");
+let gifsBooster = {};
+
+if (fs.existsSync(GIFS_DB_FILE)) {
+  try {
+    gifsBooster = JSON.parse(fs.readFileSync(GIFS_DB_FILE, "utf8"));
+  } catch (e) {
+    console.error("Error cargando gifs_booster.json:", e);
+  }
+} else {
+  fs.writeFileSync(GIFS_DB_FILE, "{}", "utf8");
+  console.log("✅ Creado gifs_booster.json automáticamente");
+}
+
+function guardarGifsBooster() {
+  fs.writeFileSync(GIFS_DB_FILE, JSON.stringify(gifsBooster, null, 2), "utf8");
+}
+
 // ===== CONFIG =====
 const NO_VERIFICADAS_ROLE_ID = "996592241260888095";
 const GIRLS_ROLE_NAME = "﹒╴girls ღﾟ˚̣̣̣";
@@ -137,13 +156,35 @@ const interaccionCommand = new SlashCommandBuilder()
       .setName("usuario")
       .setDescription("Usuario objetivo")
       .setRequired(true)
+  );
+
+const configurarGifCommand = new SlashCommandBuilder()
+  .setName("configurar_gif")
+  .setDescription("Configura o reemplaza tu GIF para una acción")
+  .addStringOption((option) =>
+    option
+      .setName("accion")
+      .setDescription("La acción a configurar")
+      .setRequired(true)
+      .addChoices(
+        { name: "abrazar", value: "abrazar" },
+        { name: "besar", value: "besar" },
+        { name: "acariciar", value: "acariciar" },
+        { name: "golpear", value: "golpear" },
+        { name: "acurrucar", value: "acurrucar" },
+        { name: "saludar", value: "saludar" }
+      )
   )
   .addStringOption((option) =>
     option
-      .setName("gif")
+      .setName("link")
       .setDescription("Link directo del GIF o imagen")
       .setRequired(true)
   );
+
+const verGifsCommand = new SlashCommandBuilder()
+  .setName("ver_gifs")
+  .setDescription("Muestra los GIFs que tienes configurados para tus acciones");
 
 // ===== REGISTER =====
 async function registerCommands() {
@@ -155,6 +196,8 @@ async function registerCommands() {
     decirCommand,
     bienvenidaCommand,
     interaccionCommand,
+    configurarGifCommand,
+    verGifsCommand,
   ].map((c) => c.toJSON());
 
   console.log("🧹 Borrando comandos del guild...");
@@ -184,10 +227,10 @@ client.once("ready", async () => {
     const guild = await client.guilds.fetch(GUILD_ID).catch(() => null);
     if (guild) {
       const fullGuild = await guild.fetch();
-      await cleanupBoosterHistories(fullGuild);
+      await cleanupBoosterData(fullGuild);
     }
   } catch (e) {
-    console.error("❌ Error limpiando historiales booster al iniciar:", e);
+    console.error("❌ Error limpiando datos booster al iniciar:", e);
   }
 });
 
@@ -279,6 +322,19 @@ function getNaturalCounterText(accion, total, nombreObjetivo) {
   return textos[accion] || `✨ **${nombreObjetivo}** ha recibido **${total} interacción${plural}**`;
 }
 
+function getActionLabel(accion) {
+  const etiquetas = {
+    abrazar: "Abrazar",
+    besar: "Besar",
+    acariciar: "Acariciar",
+    golpear: "Golpear",
+    acurrucar: "Acurrucar",
+    saludar: "Saludar",
+  };
+
+  return etiquetas[accion] || accion;
+}
+
 function ensureUserInteractionData(userId) {
   if (!interacciones[userId]) {
     interacciones[userId] = {
@@ -314,6 +370,37 @@ function ensureUserInteractionData(userId) {
   if (typeof interacciones[userId].wave === "number") {
     interacciones[userId].saludar = (interacciones[userId].saludar || 0) + interacciones[userId].wave;
     delete interacciones[userId].wave;
+  }
+}
+
+function ensureUserGifData(userId) {
+  if (!gifsBooster[userId]) {
+    gifsBooster[userId] = {};
+  }
+
+  if (typeof gifsBooster[userId].hug === "string") {
+    gifsBooster[userId].abrazar = gifsBooster[userId].hug;
+    delete gifsBooster[userId].hug;
+  }
+  if (typeof gifsBooster[userId].kiss === "string") {
+    gifsBooster[userId].besar = gifsBooster[userId].kiss;
+    delete gifsBooster[userId].kiss;
+  }
+  if (typeof gifsBooster[userId].pat === "string") {
+    gifsBooster[userId].acariciar = gifsBooster[userId].pat;
+    delete gifsBooster[userId].pat;
+  }
+  if (typeof gifsBooster[userId].slap === "string") {
+    gifsBooster[userId].golpear = gifsBooster[userId].slap;
+    delete gifsBooster[userId].slap;
+  }
+  if (typeof gifsBooster[userId].cuddle === "string") {
+    gifsBooster[userId].acurrucar = gifsBooster[userId].cuddle;
+    delete gifsBooster[userId].cuddle;
+  }
+  if (typeof gifsBooster[userId].wave === "string") {
+    gifsBooster[userId].saludar = gifsBooster[userId].wave;
+    delete gifsBooster[userId].wave;
   }
 }
 
@@ -357,33 +444,44 @@ async function ensureMembersFetched(guild) {
   return fetchingPromise;
 }
 
-async function cleanupBoosterHistories(guild) {
+async function cleanupBoosterData(guild) {
   try {
     await ensureMembersFetched(guild);
 
-    let removed = 0;
+    let removedInteracciones = 0;
+    let removedGifs = 0;
 
     for (const userId of Object.keys(interacciones)) {
       const member = guild.members.cache.get(userId);
       if (!member || !member.premiumSince) {
         delete interacciones[userId];
-        removed++;
+        removedInteracciones++;
       } else {
         ensureUserInteractionData(userId);
       }
     }
 
-    if (removed > 0 || Object.keys(interacciones).length > 0) {
+    for (const userId of Object.keys(gifsBooster)) {
+      const member = guild.members.cache.get(userId);
+      if (!member || !member.premiumSince) {
+        delete gifsBooster[userId];
+        removedGifs++;
+      } else {
+        ensureUserGifData(userId);
+      }
+    }
+
+    if (removedInteracciones > 0 || Object.keys(interacciones).length > 0) {
       guardarInteracciones();
     }
 
-    if (removed > 0) {
-      console.log(`🗑️ Historiales booster limpiados al iniciar: ${removed}`);
-    } else {
-      console.log("✅ No había historiales booster obsoletos.");
+    if (removedGifs > 0 || Object.keys(gifsBooster).length > 0) {
+      guardarGifsBooster();
     }
+
+    console.log(`✅ Limpieza booster al iniciar | Interacciones borradas: ${removedInteracciones} | GIFs borrados: ${removedGifs}`);
   } catch (e) {
-    console.error("Error en cleanupBoosterHistories:", e);
+    console.error("Error en cleanupBoosterData:", e);
   }
 }
 
@@ -645,6 +743,51 @@ Ven a saludar y platicar con nosotros en <#${CHARLA_CH}> <:00_lumi_corazon:14334
       );
     }
 
+    // ===== /configurar_gif =====
+    if (interaction.commandName === "configurar_gif") {
+      await interaction.deferReply({ ephemeral: true });
+
+      if (!(await invokerIsStaffOrBooster(interaction))) {
+        return interaction.editReply("❌ Solo **Server Boosters** o staff pueden usar este comando.");
+      }
+
+      const accion = interaction.options.getString("accion", true);
+      const link = interaction.options.getString("link", true).trim();
+
+      if (!isValidMediaUrl(link)) {
+        return interaction.editReply(
+          "❌ El link no es válido. Usa un link directo que termine en `.gif`, `.png`, `.jpg`, `.jpeg` o `.webp`."
+        );
+      }
+
+      ensureUserGifData(interaction.user.id);
+      gifsBooster[interaction.user.id][accion] = link;
+      guardarGifsBooster();
+
+      return interaction.editReply(
+        `✅ Tu GIF para **${getActionLabel(accion)}** fue configurado correctamente.`
+      );
+    }
+
+    // ===== /ver_gifs =====
+    if (interaction.commandName === "ver_gifs") {
+      await interaction.deferReply({ ephemeral: true });
+
+      if (!(await invokerIsStaffOrBooster(interaction))) {
+        return interaction.editReply("❌ Solo **Server Boosters** o staff pueden usar este comando.");
+      }
+
+      ensureUserGifData(interaction.user.id);
+
+      const acciones = ["abrazar", "besar", "acariciar", "golpear", "acurrucar", "saludar"];
+      const lineas = acciones.map((accion) => {
+        const tiene = gifsBooster[interaction.user.id]?.[accion];
+        return `• **${getActionLabel(accion)}**: ${tiene ? "✅ Configurado" : "❌ Sin configurar"}`;
+      });
+
+      return interaction.editReply(`🎞️ **Tus GIFs guardados:**\n\n${lineas.join("\n")}`);
+    }
+
     // ===== /interaccion =====
     if (interaction.commandName === "interaccion") {
       await interaction.deferReply();
@@ -661,11 +804,19 @@ Ven a saludar y platicar con nosotros en <#${CHARLA_CH}> <:00_lumi_corazon:14334
 
       const accion = interaction.options.getString("accion", true);
       const targetUser = interaction.options.getUser("usuario", true);
-      const gif = interaction.options.getString("gif", true).trim();
+
+      ensureUserGifData(interaction.user.id);
+      const gif = gifsBooster[interaction.user.id]?.[accion];
+
+      if (!gif) {
+        return interaction.editReply(
+          `❌ No tienes un GIF configurado para **${getActionLabel(accion)}**.\nUsa \`/configurar_gif\` primero.`
+        );
+      }
 
       if (!isValidMediaUrl(gif)) {
         return interaction.editReply(
-          "❌ El link no es válido. Usa un link directo que termine en `.gif`, `.png`, `.jpg`, `.jpeg` o `.webp`."
+          `❌ El GIF que guardaste para **${getActionLabel(accion)}** ya no es válido.\nConfigúralo otra vez con \`/configurar_gif\`.`
         );
       }
 
@@ -719,21 +870,33 @@ Ven a saludar y platicar con nosotros en <#${CHARLA_CH}> <:00_lumi_corazon:14334
   }
 });
 
-// ===== BORRAR HISTORIAL SI DEJA DE BOOSTEAR =====
+// ===== BORRAR DATOS SI DEJA DE BOOSTEAR =====
 client.on("guildMemberUpdate", async (oldMember, newMember) => {
   try {
     const antesBoosteaba = !!oldMember.premiumSince;
     const ahoraBoostea = !!newMember.premiumSince;
 
     if (antesBoosteaba && !ahoraBoostea) {
+      let borrado = false;
+
       if (interacciones[newMember.id]) {
         delete interacciones[newMember.id];
         guardarInteracciones();
-        console.log(`🗑️ Historial booster eliminado para ${newMember.user.tag} (${newMember.id})`);
+        borrado = true;
+      }
+
+      if (gifsBooster[newMember.id]) {
+        delete gifsBooster[newMember.id];
+        guardarGifsBooster();
+        borrado = true;
+      }
+
+      if (borrado) {
+        console.log(`🗑️ Datos booster eliminados para ${newMember.user.tag} (${newMember.id})`);
       }
     }
   } catch (err) {
-    console.error("Error en guildMemberUpdate al limpiar historial booster:", err);
+    console.error("Error en guildMemberUpdate al limpiar datos booster:", err);
   }
 });
 
