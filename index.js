@@ -289,7 +289,6 @@ function ensureUserInteractionData(userId) {
     };
   }
 
-  // Compatibilidad por si había claves viejas en inglés
   if (typeof interacciones[userId].hug === "number") {
     interacciones[userId].abrazar = (interacciones[userId].abrazar || 0) + interacciones[userId].hug;
     delete interacciones[userId].hug;
@@ -670,6 +669,12 @@ Ven a saludar y platicar con nosotros en <#${CHARLA_CH}> <:00_lumi_corazon:14334
 
       boosterCooldown.set(interaction.user.id, Date.now());
 
+      const autorMember = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
+      const targetMember = await interaction.guild.members.fetch(targetUser.id).catch(() => null);
+
+      const nombreAutor = autorMember ? autorMember.displayName : interaction.user.username;
+      const nombreObjetivo = targetMember ? targetMember.displayName : targetUser.username;
+
       ensureUserInteractionData(interaction.user.id);
       interacciones[interaction.user.id][accion] =
         (interacciones[interaction.user.id][accion] || 0) + 1;
@@ -682,8 +687,8 @@ Ven a saludar y platicar con nosotros en <#${CHARLA_CH}> <:00_lumi_corazon:14334
 
       const embed = new EmbedBuilder()
         .setColor(0xFADADD)
-        .setTitle(`${interaction.user.username} ${actionText} a ${targetUser.username}`)
-        .setDescription(`✨ **${actionLabel} #${totalUsuario}** para **${interaction.user.username}**`)
+        .setTitle(`${nombreAutor} ${actionText} a ${nombreObjetivo}`)
+        .setDescription(`✨ **${actionLabel} #${totalUsuario}** para **${nombreAutor}**`)
         .setImage(gif)
         .setFooter({ text: "Interacciones especiales para Server Boosters 💎" })
         .setTimestamp();
