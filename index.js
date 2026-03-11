@@ -8,6 +8,7 @@ const {
   REST,
   Routes,
   SlashCommandBuilder,
+  EmbedBuilder,
 } = require("discord.js");
 
 const DISCORD_TOKEN = (process.env.DISCORD_TOKEN || "").trim();
@@ -34,9 +35,30 @@ function guardarVerificadas() {
   fs.writeFileSync(VERIF_DB_FILE, JSON.stringify(verificadas, null, 2), "utf8");
 }
 
+// ===== ARCHIVO PARA INTERACCIONES BOOSTER =====
+const INTER_DB_FILE = path.join(__dirname, "interacciones.json");
+let interacciones = {};
+
+if (fs.existsSync(INTER_DB_FILE)) {
+  try {
+    interacciones = JSON.parse(fs.readFileSync(INTER_DB_FILE, "utf8"));
+  } catch (e) {
+    console.error("Error cargando interacciones.json:", e);
+  }
+} else {
+  fs.writeFileSync(INTER_DB_FILE, "{}", "utf8");
+  console.log("✅ Creado interacciones.json automáticamente");
+}
+
+function guardarInteracciones() {
+  fs.writeFileSync(INTER_DB_FILE, JSON.stringify(interacciones, null, 2), "utf8");
+}
+
 // ===== CONFIG =====
 const NO_VERIFICADAS_ROLE_ID = "996592241260888095";
 const GIRLS_ROLE_NAME = "﹒╴girls ღﾟ˚̣̣̣";
+const BOOSTER_ROLE_ID = "1081615312891412480";
+
 const allowedRoleIds = [
   "1447179100551905321", // Admin
   "1222199503873114175", // Mod
@@ -93,6 +115,36 @@ const bienvenidaCommand = new SlashCommandBuilder()
       .setRequired(true)
   );
 
+const boosterCommand = new SlashCommandBuilder()
+  .setName("booster")
+  .setDescription("Interacción especial para Server Boosters")
+  .addStringOption((option) =>
+    option
+      .setName("accion")
+      .setDescription("La acción que quieres usar")
+      .setRequired(true)
+      .addChoices(
+        { name: "hug", value: "hug" },
+        { name: "kiss", value: "kiss" },
+        { name: "pat", value: "pat" },
+        { name: "slap", value: "slap" },
+        { name: "cuddle", value: "cuddle" },
+        { name: "wave", value: "wave" }
+      )
+  )
+  .addUserOption((option) =>
+    option
+      .setName("usuario")
+      .setDescription("Usuario objetivo")
+      .setRequired(true)
+  )
+  .addStringOption((option) =>
+    option
+      .setName("gif")
+      .setDescription("Link directo del GIF o imagen")
+      .setRequired(true)
+  );
+
 // ===== REGISTER =====
 async function registerCommands() {
   const rest = new REST({ version: "10" }).setToken(DISCORD_TOKEN);
@@ -102,6 +154,7 @@ async function registerCommands() {
     limpiarCommand,
     sayCommand,
     bienvenidaCommand,
+    boosterCommand,
   ].map((c) => c.toJSON());
 
   console.log("🧹 Borrando comandos del guild...");
@@ -113,6 +166,7 @@ async function registerCommands() {
 
 client.once("ready", async () => {
   console.log(`🤖 Bot conectado como ${client.user.tag}`);
+
   try {
     await registerCommands();
     console.log("✅ Comandos registrados/actualizados.");
@@ -125,6 +179,16 @@ client.once("ready", async () => {
   } else {
     console.log(`✅ LOG_CHANNEL_ID: ${LOG_CHANNEL_ID}`);
   }
+
+  try {
+    const guild = await client.guilds.fetch(GUILD_ID).catch(() => null);
+    if (guild) {
+      const fullGuild = await guild.fetch();
+      await cleanupBoosterHistories(fullGuild);
+    }
+  } catch (e) {
+    console.error("❌ Error limpiando historiales booster al iniciar:", e);
+  }
 });
 
 // ===== HELPERS =====
@@ -136,6 +200,15 @@ async function invokerHasPermission(interaction) {
   if (!interaction.inGuild()) return false;
   const invoker = await interaction.guild.members.fetch(interaction.user.id);
   return invoker.roles.cache.some((r) => allowedRoleIds.includes(r.id));
+}
+
+async function invokerIsStaffOrBooster(interaction) {
+  if (!interaction.inGuild()) return false;
+  const invoker = await interaction.guild.members.fetch(interaction.user.id);
+  return (
+    invoker.roles.cache.some((r) => allowedRoleIds.includes(r.id)) ||
+    invoker.roles.cache.has(BOOSTER_ROLE_ID)
+  );
 }
 
 async function sendLog(interaction, content) {
@@ -155,7 +228,56 @@ async function sendLog(interaction, content) {
   }
 }
 
-const FETCH_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutos
+function isValidMediaUrl(url) {
+  if (!url || typeof url !== "string") return false;
+
+  try {
+    const parsed = new URL(url);
+    if (!["http:", "https:"].includes(parsed.protocol)) return false;
+
+    const lower = url.toLowerCase();
+
+    if (/\.(gif|png|jpe?g|webp)(\?.*)?$/i.test(lower)) return true;
+    if (lower.includes("media.discordapp.net")) return true;
+    if (lower.includes("cdn.discordapp.com")) return true;
+    if (lower.includes("images-ext-1.discordapp.net")) return true;
+    if (lower.includes("i.imgur.com")) return true;
+    if (lower.includes("media.tenor.com")) return true;
+    if (lower.includes("c.tenor.com")) return true;
+
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+function getActionText(accion) {
+  const accionesTexto = {
+    hug: "abrazó 🤗",
+    kiss: "besó 💋",
+    pat: "acarició 🫳",
+    slap: "golpeó 💥",
+    cuddle: "se acurrucó con 🫂",
+    wave: "saludó 👋",
+  };
+
+  return accionesTexto[accion] || "interactuó con";
+}
+
+function ensureUserInteractionData(userId) {
+  if (!interacciones[userId]) {
+    interacciones[userId] = {
+      hug: 0,
+      kiss: 0,
+      pat: 0,
+      slap: 0,
+      cuddle: 0,
+      wave: 0,
+    };
+  }
+}
+
+const FETCH_COOLDOWN_MS = 5 * 60 * 1000;
 let lastFetchAt = 0;
 let fetchingPromise = null;
 
@@ -194,6 +316,35 @@ async function ensureMembersFetched(guild) {
 
   return fetchingPromise;
 }
+
+async function cleanupBoosterHistories(guild) {
+  try {
+    await ensureMembersFetched(guild);
+
+    let removed = 0;
+
+    for (const userId of Object.keys(interacciones)) {
+      const member = guild.members.cache.get(userId);
+      if (!member || !member.premiumSince) {
+        delete interacciones[userId];
+        removed++;
+      }
+    }
+
+    if (removed > 0) {
+      guardarInteracciones();
+      console.log(`🗑️ Historiales booster limpiados al iniciar: ${removed}`);
+    } else {
+      console.log("✅ No había historiales booster obsoletos.");
+    }
+  } catch (e) {
+    console.error("Error en cleanupBoosterHistories:", e);
+  }
+}
+
+// ===== COOLDOWN BOOSTER =====
+const boosterCooldown = new Map();
+const BOOSTER_COOLDOWN_MS = 20 * 1000;
 
 // ===== INTERACTIONS =====
 client.on("interactionCreate", async (interaction) => {
@@ -448,6 +599,67 @@ Ven a saludar y platicar con nosotros en <#${CHARLA_CH}> <:00_lumi_corazon:14334
         `🧹 Limpieza completa: **${kicked}** expulsadas.${failed ? ` (${failed} no se pudieron expulsar)` : ""}`
       );
     }
+
+    // ===== /booster =====
+    if (interaction.commandName === "booster") {
+      await interaction.deferReply();
+
+      if (BOOSTER_ROLE_ID === "PON_AQUI_EL_ID_DEL_ROL_SERVER_BOOSTER") {
+        return interaction.editReply("❌ Aún no configuraste `BOOSTER_ROLE_ID` en el código.");
+      }
+
+      if (!(await invokerIsStaffOrBooster(interaction))) {
+        return interaction.editReply("❌ Solo **Server Boosters** o staff pueden usar este comando.");
+      }
+
+      const lastUse = boosterCooldown.get(interaction.user.id);
+      if (lastUse && Date.now() - lastUse < BOOSTER_COOLDOWN_MS) {
+        const remaining = Math.ceil((BOOSTER_COOLDOWN_MS - (Date.now() - lastUse)) / 1000);
+        return interaction.editReply(`⏳ Espera **${remaining}s** antes de usarlo otra vez.`);
+      }
+
+      const accion = interaction.options.getString("accion", true);
+      const targetUser = interaction.options.getUser("usuario", true);
+      const gif = interaction.options.getString("gif", true).trim();
+
+      if (!isValidMediaUrl(gif)) {
+        return interaction.editReply(
+          "❌ El link no es válido. Usa un link directo que termine en `.gif`, `.png`, `.jpg`, `.jpeg` o `.webp`."
+        );
+      }
+
+      boosterCooldown.set(interaction.user.id, Date.now());
+
+      ensureUserInteractionData(interaction.user.id);
+      interacciones[interaction.user.id][accion] =
+        (interacciones[interaction.user.id][accion] || 0) + 1;
+
+      guardarInteracciones();
+
+      const totalUsuario = interacciones[interaction.user.id][accion];
+      const actionText = getActionText(accion);
+
+      const embed = new EmbedBuilder()
+        .setColor(0xFADADD)
+        .setTitle(`${interaction.user.username} ${actionText} a ${targetUser.username}`)
+        .setDescription(`✨ **${accion.toUpperCase()} #${totalUsuario}** para **${interaction.user.username}**`)
+        .setImage(gif)
+        .setFooter({ text: "Interacciones especiales para Server Boosters 💎" })
+        .setTimestamp();
+
+      await interaction.editReply({
+        embeds: [embed],
+        allowedMentions: { users: [targetUser.id] },
+      });
+
+      await sendLog(
+        interaction,
+        `💎 **/booster usado**\n` +
+          `Usuario: ${interaction.user.tag} (${interaction.user.id})\n` +
+          `Acción: ${accion}\n` +
+          `Objetivo: ${targetUser.tag} (${targetUser.id})`
+      ).catch(() => {});
+    }
   } catch (err) {
     console.error("❌ Error en interactionCreate:", err);
 
@@ -456,6 +668,24 @@ Ven a saludar y platicar con nosotros en <#${CHARLA_CH}> <:00_lumi_corazon:14334
     } else {
       await interaction.reply({ content: "❌ Error interno.", ephemeral: true }).catch(() => {});
     }
+  }
+});
+
+// ===== BORRAR HISTORIAL SI DEJA DE BOOSTEAR =====
+client.on("guildMemberUpdate", async (oldMember, newMember) => {
+  try {
+    const antesBoosteaba = !!oldMember.premiumSince;
+    const ahoraBoostea = !!newMember.premiumSince;
+
+    if (antesBoosteaba && !ahoraBoostea) {
+      if (interacciones[newMember.id]) {
+        delete interacciones[newMember.id];
+        guardarInteracciones();
+        console.log(`🗑️ Historial booster eliminado para ${newMember.user.tag} (${newMember.id})`);
+      }
+    }
+  } catch (err) {
+    console.error("Error en guildMemberUpdate al limpiar historial booster:", err);
   }
 });
 
