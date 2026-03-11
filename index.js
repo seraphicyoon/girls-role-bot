@@ -77,8 +77,8 @@ const client = new Client({
 });
 
 // ===== COMMANDS =====
-const girlsCommand = new SlashCommandBuilder()
-  .setName("girls")
+const verificarCommand = new SlashCommandBuilder()
+  .setName("verificar")
   .setDescription("Asigna el rol Girls y quita no verificadas")
   .addUserOption((option) =>
     option.setName("usuario").setDescription("Usuario a verificar").setRequired(true)
@@ -98,8 +98,8 @@ const limpiarCommand = new SlashCommandBuilder()
       .setRequired(true)
   );
 
-const sayCommand = new SlashCommandBuilder()
-  .setName("say")
+const decirCommand = new SlashCommandBuilder()
+  .setName("decir")
   .setDescription("Enviar un mensaje como el bot (anónimo)")
   .addStringOption((option) =>
     option.setName("mensaje").setDescription("Mensaje que enviará el bot").setRequired(true)
@@ -115,8 +115,8 @@ const bienvenidaCommand = new SlashCommandBuilder()
       .setRequired(true)
   );
 
-const boosterCommand = new SlashCommandBuilder()
-  .setName("booster")
+const interaccionCommand = new SlashCommandBuilder()
+  .setName("interaccion")
   .setDescription("Interacción especial para Server Boosters")
   .addStringOption((option) =>
     option
@@ -124,12 +124,12 @@ const boosterCommand = new SlashCommandBuilder()
       .setDescription("La acción que quieres usar")
       .setRequired(true)
       .addChoices(
-        { name: "hug", value: "hug" },
-        { name: "kiss", value: "kiss" },
-        { name: "pat", value: "pat" },
-        { name: "slap", value: "slap" },
-        { name: "cuddle", value: "cuddle" },
-        { name: "wave", value: "wave" }
+        { name: "abrazar", value: "abrazar" },
+        { name: "besar", value: "besar" },
+        { name: "acariciar", value: "acariciar" },
+        { name: "golpear", value: "golpear" },
+        { name: "acurrucar", value: "acurrucar" },
+        { name: "saludar", value: "saludar" }
       )
   )
   .addUserOption((option) =>
@@ -149,12 +149,12 @@ const boosterCommand = new SlashCommandBuilder()
 async function registerCommands() {
   const rest = new REST({ version: "10" }).setToken(DISCORD_TOKEN);
   const commands = [
-    girlsCommand,
+    verificarCommand,
     pendientesCommand,
     limpiarCommand,
-    sayCommand,
+    decirCommand,
     bienvenidaCommand,
-    boosterCommand,
+    interaccionCommand,
   ].map((c) => c.toJSON());
 
   console.log("🧹 Borrando comandos del guild...");
@@ -253,27 +253,66 @@ function isValidMediaUrl(url) {
 
 function getActionText(accion) {
   const accionesTexto = {
-    hug: "abrazó 🤗",
-    kiss: "besó 💋",
-    pat: "acarició 🫳",
-    slap: "golpeó 💥",
-    cuddle: "se acurrucó con 🫂",
-    wave: "saludó 👋",
+    abrazar: "abrazó 🤗",
+    besar: "besó 💋",
+    acariciar: "acarició 🫳",
+    golpear: "golpeó 💥",
+    acurrucar: "se acurrucó con 🫂",
+    saludar: "saludó 👋",
   };
 
   return accionesTexto[accion] || "interactuó con";
 }
 
+function getActionLabel(accion) {
+  const etiquetas = {
+    abrazar: "ABRAZO",
+    besar: "BESO",
+    acariciar: "CARICIA",
+    golpear: "GOLPE",
+    acurrucar: "ACURRUCAR",
+    saludar: "SALUDO",
+  };
+
+  return etiquetas[accion] || accion.toUpperCase();
+}
+
 function ensureUserInteractionData(userId) {
   if (!interacciones[userId]) {
     interacciones[userId] = {
-      hug: 0,
-      kiss: 0,
-      pat: 0,
-      slap: 0,
-      cuddle: 0,
-      wave: 0,
+      abrazar: 0,
+      besar: 0,
+      acariciar: 0,
+      golpear: 0,
+      acurrucar: 0,
+      saludar: 0,
     };
+  }
+
+  // Compatibilidad por si había claves viejas en inglés
+  if (typeof interacciones[userId].hug === "number") {
+    interacciones[userId].abrazar = (interacciones[userId].abrazar || 0) + interacciones[userId].hug;
+    delete interacciones[userId].hug;
+  }
+  if (typeof interacciones[userId].kiss === "number") {
+    interacciones[userId].besar = (interacciones[userId].besar || 0) + interacciones[userId].kiss;
+    delete interacciones[userId].kiss;
+  }
+  if (typeof interacciones[userId].pat === "number") {
+    interacciones[userId].acariciar = (interacciones[userId].acariciar || 0) + interacciones[userId].pat;
+    delete interacciones[userId].pat;
+  }
+  if (typeof interacciones[userId].slap === "number") {
+    interacciones[userId].golpear = (interacciones[userId].golpear || 0) + interacciones[userId].slap;
+    delete interacciones[userId].slap;
+  }
+  if (typeof interacciones[userId].cuddle === "number") {
+    interacciones[userId].acurrucar = (interacciones[userId].acurrucar || 0) + interacciones[userId].cuddle;
+    delete interacciones[userId].cuddle;
+  }
+  if (typeof interacciones[userId].wave === "number") {
+    interacciones[userId].saludar = (interacciones[userId].saludar || 0) + interacciones[userId].wave;
+    delete interacciones[userId].wave;
   }
 }
 
@@ -328,11 +367,16 @@ async function cleanupBoosterHistories(guild) {
       if (!member || !member.premiumSince) {
         delete interacciones[userId];
         removed++;
+      } else {
+        ensureUserInteractionData(userId);
       }
     }
 
-    if (removed > 0) {
+    if (removed > 0 || Object.keys(interacciones).length > 0) {
       guardarInteracciones();
+    }
+
+    if (removed > 0) {
       console.log(`🗑️ Historiales booster limpiados al iniciar: ${removed}`);
     } else {
       console.log("✅ No había historiales booster obsoletos.");
@@ -351,8 +395,8 @@ client.on("interactionCreate", async (interaction) => {
   if (!interaction.isChatInputCommand() || !interaction.inGuild()) return;
 
   try {
-    // ===== /say =====
-    if (interaction.commandName === "say") {
+    // ===== /decir =====
+    if (interaction.commandName === "decir") {
       await interaction.deferReply({ ephemeral: true });
 
       if (!(await invokerHasPermission(interaction))) {
@@ -372,7 +416,7 @@ client.on("interactionCreate", async (interaction) => {
 
       const jumpLink = `https://discord.com/channels/${interaction.guildId}/${interaction.channelId}/${sentMessage.id}`;
       const logText =
-        `📝 **/say usado**\n` +
+        `📝 **/decir usado**\n` +
         `Usuario: ${interaction.user.tag}\n` +
         `Canal: <#${interaction.channelId}>\n` +
         `Link: ${jumpLink}\n` +
@@ -424,8 +468,8 @@ Ven a saludar y platicar con nosotros en <#${CHARLA_CH}> <:00_lumi_corazon:14334
       }
     }
 
-    // ===== /girls =====
-    if (interaction.commandName === "girls") {
+    // ===== /verificar =====
+    if (interaction.commandName === "verificar") {
       await interaction.deferReply({ ephemeral: true });
 
       if (!(await invokerHasPermission(interaction))) {
@@ -466,7 +510,7 @@ Ven a saludar y platicar con nosotros en <#${CHARLA_CH}> <:00_lumi_corazon:14334
       };
       guardarVerificadas();
 
-      await sendLog(interaction, `✅ **/girls usado** por ${interaction.user.tag} a ${member.user.tag}`);
+      await sendLog(interaction, `✅ **/verificar usado** por ${interaction.user.tag} a ${member.user.tag}`);
       return interaction.editReply(
         `✅ ${member} verificada: **Girls** asignado y **no verificadas** removido.`
       );
@@ -600,13 +644,9 @@ Ven a saludar y platicar con nosotros en <#${CHARLA_CH}> <:00_lumi_corazon:14334
       );
     }
 
-    // ===== /booster =====
-    if (interaction.commandName === "booster") {
+    // ===== /interaccion =====
+    if (interaction.commandName === "interaccion") {
       await interaction.deferReply();
-
-      if (BOOSTER_ROLE_ID === "PON_AQUI_EL_ID_DEL_ROL_SERVER_BOOSTER") {
-        return interaction.editReply("❌ Aún no configuraste `BOOSTER_ROLE_ID` en el código.");
-      }
 
       if (!(await invokerIsStaffOrBooster(interaction))) {
         return interaction.editReply("❌ Solo **Server Boosters** o staff pueden usar este comando.");
@@ -638,11 +678,12 @@ Ven a saludar y platicar con nosotros en <#${CHARLA_CH}> <:00_lumi_corazon:14334
 
       const totalUsuario = interacciones[interaction.user.id][accion];
       const actionText = getActionText(accion);
+      const actionLabel = getActionLabel(accion);
 
       const embed = new EmbedBuilder()
         .setColor(0xFADADD)
         .setTitle(`${interaction.user.username} ${actionText} a ${targetUser.username}`)
-        .setDescription(`✨ **${accion.toUpperCase()} #${totalUsuario}** para **${interaction.user.username}**`)
+        .setDescription(`✨ **${actionLabel} #${totalUsuario}** para **${interaction.user.username}**`)
         .setImage(gif)
         .setFooter({ text: "Interacciones especiales para Server Boosters 💎" })
         .setTimestamp();
@@ -654,7 +695,7 @@ Ven a saludar y platicar con nosotros en <#${CHARLA_CH}> <:00_lumi_corazon:14334
 
       await sendLog(
         interaction,
-        `💎 **/booster usado**\n` +
+        `💎 **/interaccion usado**\n` +
           `Usuario: ${interaction.user.tag} (${interaction.user.id})\n` +
           `Acción: ${accion}\n` +
           `Objetivo: ${targetUser.tag} (${targetUser.id})`
