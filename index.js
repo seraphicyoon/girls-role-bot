@@ -1,6 +1,6 @@
 require("dotenv").config();
-const fs = require('fs');
-const path = require('path');
+const fs = require("fs");
+const path = require("path");
 const {
   Client,
   GatewayIntentBits,
@@ -8,7 +8,6 @@ const {
   REST,
   Routes,
   SlashCommandBuilder,
-  EmbedBuilder,
 } = require("discord.js");
 
 const DISCORD_TOKEN = (process.env.DISCORD_TOKEN || "").trim();
@@ -17,21 +16,22 @@ const GUILD_ID = (process.env.GUILD_ID || "").trim();
 const LOG_CHANNEL_ID = (process.env.LOG_CHANNEL_ID || "").trim();
 
 // ===== ARCHIVO PARA VERIFICACIONES =====
-const VERIF_DB_FILE = path.join(__dirname, 'verificadas.json');
+const VERIF_DB_FILE = path.join(__dirname, "verificadas.json");
 let verificadas = {};
+
 if (fs.existsSync(VERIF_DB_FILE)) {
   try {
-    verificadas = JSON.parse(fs.readFileSync(VERIF_DB_FILE, 'utf8'));
+    verificadas = JSON.parse(fs.readFileSync(VERIF_DB_FILE, "utf8"));
   } catch (e) {
     console.error("Error cargando verificadas.json:", e);
   }
 } else {
-  fs.writeFileSync(VERIF_DB_FILE, '{}', 'utf8');
+  fs.writeFileSync(VERIF_DB_FILE, "{}", "utf8");
   console.log("✅ Creado verificadas.json automáticamente");
 }
 
 function guardarVerificadas() {
-  fs.writeFileSync(VERIF_DB_FILE, JSON.stringify(verificadas, null, 2), 'utf8');
+  fs.writeFileSync(VERIF_DB_FILE, JSON.stringify(verificadas, null, 2), "utf8");
 }
 
 // ===== CONFIG =====
@@ -50,7 +50,7 @@ const client = new Client({
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMembers,
     GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent
+    GatewayIntentBits.MessageContent,
   ],
 });
 
@@ -70,7 +70,10 @@ const limpiarCommand = new SlashCommandBuilder()
   .setName("limpiar_pendientes")
   .setDescription("Expulsa personas con no verificadas (5 días)")
   .addBooleanOption((option) =>
-    option.setName("confirmar").setDescription("⚠️ true = expulsar | false = solo preview").setRequired(true)
+    option
+      .setName("confirmar")
+      .setDescription("⚠️ true = expulsar | false = solo preview")
+      .setRequired(true)
   );
 
 const sayCommand = new SlashCommandBuilder()
@@ -84,21 +87,10 @@ const bienvenidaCommand = new SlashCommandBuilder()
   .setName("bienvenida")
   .setDescription("Envía el mensaje de verificación/bienvenida a una usuaria")
   .addUserOption((option) =>
-    option.setName("usuario").setDescription("Usuaria a la que se le enviará la bienvenida").setRequired(true)
-  );
-
-const metodosCommand = new SlashCommandBuilder()
-  .setName("metodos")
-  .setDescription("Envía los métodos de verificación a la usuaria en este ticket")
-  .addUserOption((option) =>
-    option.setName("usuario").setDescription("La usuaria que necesita ver los métodos").setRequired(true)
-  );
-
-const infoCommand = new SlashCommandBuilder()
-  .setName("info")
-  .setDescription("Muestra información de un usuario (solo staff)")
-  .addUserOption((option) =>
-    option.setName("usuario").setDescription("El usuario del que quieres ver info").setRequired(true)
+    option
+      .setName("usuario")
+      .setDescription("Usuaria a la que se le enviará la bienvenida")
+      .setRequired(true)
   );
 
 // ===== REGISTER =====
@@ -110,8 +102,6 @@ async function registerCommands() {
     limpiarCommand,
     sayCommand,
     bienvenidaCommand,
-    metodosCommand,
-    infoCommand,
   ].map((c) => c.toJSON());
 
   console.log("🧹 Borrando comandos del guild...");
@@ -129,6 +119,7 @@ client.once("ready", async () => {
   } catch (e) {
     console.error("❌ Error registrando comandos:", e);
   }
+
   if (!LOG_CHANNEL_ID) {
     console.log("⚠️ LOG_CHANNEL_ID no está configurado.");
   } else {
@@ -147,22 +138,15 @@ async function invokerHasPermission(interaction) {
   return invoker.roles.cache.some((r) => allowedRoleIds.includes(r.id));
 }
 
-function getPendientesFromCache(guild) {
-  const FIVE_DAYS = 5 * 24 * 60 * 60 * 1000;
-  const cutoff = Date.now() - FIVE_DAYS;
-  return guild.members.cache.filter((m) => {
-    if (m.user.bot) return false;
-    if (!m.roles.cache.has(NO_VERIFICADAS_ROLE_ID)) return false;
-    if (!m.joinedAt) return false;
-    return m.joinedAt.getTime() <= cutoff;
-  });
-}
-
 async function sendLog(interaction, content) {
   if (!LOG_CHANNEL_ID) return { ok: false, error: "LOG_CHANNEL_ID no configurado" };
+
   try {
     const logChannel = await interaction.guild.channels.fetch(LOG_CHANNEL_ID);
-    if (!logChannel || !logChannel.isTextBased()) return { ok: false, error: "Canal de logs inválido" };
+    if (!logChannel || !logChannel.isTextBased()) {
+      return { ok: false, error: "Canal de logs inválido" };
+    }
+
     await logChannel.send({ content, allowedMentions: { parse: [] } });
     return { ok: true };
   } catch (e) {
@@ -177,14 +161,17 @@ let fetchingPromise = null;
 
 async function ensureMembersFetched(guild) {
   const now = Date.now();
+
   if (now - lastFetchAt < FETCH_COOLDOWN_MS) {
     console.log("[fetch] Cache reciente, usando miembros en memoria.");
     return;
   }
+
   if (fetchingPromise) {
     console.log("[fetch] Ya hay un fetch en curso, esperando...");
     return fetchingPromise;
   }
+
   fetchingPromise = (async () => {
     try {
       console.log("[fetch] Cargando miembros...");
@@ -216,21 +203,37 @@ client.on("interactionCreate", async (interaction) => {
     // ===== /say =====
     if (interaction.commandName === "say") {
       await interaction.deferReply({ ephemeral: true });
-      if (!(await invokerHasPermission(interaction))) return interaction.editReply("❌ No tienes permiso.");
+
+      if (!(await invokerHasPermission(interaction))) {
+        return interaction.editReply("❌ No tienes permiso.");
+      }
+
       const texto = interaction.options.getString("mensaje", true);
+
       if (texto.includes("@everyone") || texto.includes("@here")) {
         return interaction.editReply("❌ No se permite @everyone/@here.");
       }
-      const sentMessage = await interaction.channel.send({ content: texto, allowedMentions: { parse: [] } });
+
+      const sentMessage = await interaction.channel.send({
+        content: texto,
+        allowedMentions: { parse: [] },
+      });
+
       const jumpLink = `https://discord.com/channels/${interaction.guildId}/${interaction.channelId}/${sentMessage.id}`;
-      const logText = `📝 **/say usado**\nUsuario: ${interaction.user.tag}\nCanal: <#${interaction.channelId}>\nLink: ${jumpLink}\nMensaje: ${texto}`;
+      const logText =
+        `📝 **/say usado**\n` +
+        `Usuario: ${interaction.user.tag}\n` +
+        `Canal: <#${interaction.channelId}>\n` +
+        `Link: ${jumpLink}\n` +
+        `Mensaje: ${texto}`;
+
       await sendLog(interaction, logText);
       return interaction.editReply("✅ Mensaje enviado.");
     }
 
-    // ===== /bienvenida ===== (CORREGIDO: confirmación privada, mensaje principal visible)
+    // ===== /bienvenida =====
     if (interaction.commandName === "bienvenida") {
-      await interaction.deferReply({ ephemeral: true }); // ← privado solo para el staff
+      await interaction.deferReply({ ephemeral: true });
 
       if (!(await invokerHasPermission(interaction))) {
         return interaction.editReply("❌ No tienes permiso.");
@@ -255,14 +258,15 @@ Ven a saludar y platicar con nosotros en <#${CHARLA_CH}> <:00_lumi_corazon:14334
         });
 
         const jumpLink = `https://discord.com/channels/${interaction.guildId}/${interaction.channelId}/${sentMessage.id}`;
-        const logText = `💌 **/bienvenida usado**\n` +
-                        `Staff: ${interaction.user.tag} (${interaction.user.id})\n` +
-                        `Usuaria: ${user.tag} (${user.id})\n` +
-                        `Canal: <#${interaction.channelId}>\n` +
-                        `Link: ${jumpLink}`;
-        await sendLog(interaction, logText).catch(() => {});
+        const logText =
+          `💌 **/bienvenida usado**\n` +
+          `Staff: ${interaction.user.tag} (${interaction.user.id})\n` +
+          `Usuaria: ${user.tag} (${user.id})\n` +
+          `Canal: <#${interaction.channelId}>\n` +
+          `Link: ${jumpLink}`;
 
-        return interaction.editReply("✅ Bienvenida enviada."); // ← esto es privado
+        await sendLog(interaction, logText).catch(() => {});
+        return interaction.editReply("✅ Bienvenida enviada.");
       } catch (err) {
         console.error("Error enviando bienvenida:", err);
         return interaction.editReply("❌ No pude enviar la bienvenida. ¿Permisos?");
@@ -272,35 +276,61 @@ Ven a saludar y platicar con nosotros en <#${CHARLA_CH}> <:00_lumi_corazon:14334
     // ===== /girls =====
     if (interaction.commandName === "girls") {
       await interaction.deferReply({ ephemeral: true });
-      if (!(await invokerHasPermission(interaction))) return interaction.editReply("❌ No tienes permiso.");
+
+      if (!(await invokerHasPermission(interaction))) {
+        return interaction.editReply("❌ No tienes permiso.");
+      }
+
       const member = interaction.options.getMember("usuario");
       const girlsRole = interaction.guild.roles.cache.find((r) => r.name === GIRLS_ROLE_NAME);
-      if (!member || !girlsRole) return interaction.editReply("❌ Error obteniendo usuario o rol.");
+
+      if (!member || !girlsRole) {
+        return interaction.editReply("❌ Error obteniendo usuario o rol.");
+      }
+
       const me = await interaction.guild.members.fetchMe();
-      if (!me.permissions.has(PermissionsBitField.Flags.ManageRoles)) return interaction.editReply("❌ No tengo permiso Manage Roles.");
-      if (me.roles.highest.position <= girlsRole.position) return interaction.editReply("❌ Mi rol debe estar arriba de Girls.");
-      if (member.roles.cache.has(girlsRole.id)) return interaction.editReply("ℹ️ Ya tiene Girls.");
+
+      if (!me.permissions.has(PermissionsBitField.Flags.ManageRoles)) {
+        return interaction.editReply("❌ No tengo permiso Manage Roles.");
+      }
+
+      if (me.roles.highest.position <= girlsRole.position) {
+        return interaction.editReply("❌ Mi rol debe estar arriba de Girls.");
+      }
+
+      if (member.roles.cache.has(girlsRole.id)) {
+        return interaction.editReply("ℹ️ Ya tiene Girls.");
+      }
+
       await member.roles.add(girlsRole);
-      if (member.roles.cache.has(NO_VERIFICADAS_ROLE_ID)) await member.roles.remove(NO_VERIFICADAS_ROLE_ID);
+
+      if (member.roles.cache.has(NO_VERIFICADAS_ROLE_ID)) {
+        await member.roles.remove(NO_VERIFICADAS_ROLE_ID);
+      }
 
       verificadas[member.id] = {
         verificadaPor: interaction.user.id,
         verificadaPorTag: interaction.user.tag,
-        fecha: new Date().toISOString()
+        fecha: new Date().toISOString(),
       };
       guardarVerificadas();
 
       await sendLog(interaction, `✅ **/girls usado** por ${interaction.user.tag} a ${member.user.tag}`);
-      return interaction.editReply(`✅ ${member} verificada: **Girls** asignado y **no verificadas** removido.`);
+      return interaction.editReply(
+        `✅ ${member} verificada: **Girls** asignado y **no verificadas** removido.`
+      );
     }
 
     // ===== /pendientes =====
     if (interaction.commandName === "pendientes") {
       await interaction.deferReply({ ephemeral: true });
+
       if (!(await invokerHasPermission(interaction))) {
         return interaction.editReply("❌ No tienes permiso.");
       }
+
       console.log("[/pendientes] Iniciando...");
+
       try {
         await ensureMembersFetched(interaction.guild);
       } catch (e) {
@@ -311,15 +341,18 @@ Ven a saludar y platicar con nosotros en <#${CHARLA_CH}> <:00_lumi_corazon:14334
         console.error("[/pendientes] Error:", e);
         return interaction.editReply("❌ Error al cargar miembros.");
       }
+
       const pendientes = interaction.guild.members.cache.filter((m) => {
         if (m.user.bot) return false;
         if (!m.roles.cache.has(NO_VERIFICADAS_ROLE_ID)) return false;
         if (!m.joinedAt) return false;
-        return m.joinedAt.getTime() <= (Date.now() - 5 * 24 * 60 * 60 * 1000);
+        return m.joinedAt.getTime() <= Date.now() - 5 * 24 * 60 * 60 * 1000;
       });
+
       if (pendientes.size === 0) {
         return interaction.editReply("✅ No hay pendientes de 5 días.");
       }
+
       const list = [...pendientes.values()]
         .sort((a, b) => a.joinedAt - b.joinedAt)
         .slice(0, 40)
@@ -327,20 +360,26 @@ Ven a saludar y platicar con nosotros en <#${CHARLA_CH}> <:00_lumi_corazon:14334
           const t = Math.floor(m.joinedAt.getTime() / 1000);
           return `${i + 1}. ${m} — entró <t:${t}:R>`;
         });
-      await sendLog(interaction, `📌 **/pendientes usado**\nStaff: ${interaction.user.tag}\nEncontrados: ${pendientes.size}`);
-      return interaction.editReply(
-        `📌 **Pendientes (5 días):** ${pendientes.size}\n\n${list.join("\n")}`
+
+      await sendLog(
+        interaction,
+        `📌 **/pendientes usado**\nStaff: ${interaction.user.tag}\nEncontrados: ${pendientes.size}`
       );
+
+      return interaction.editReply(`📌 **Pendientes (5 días):** ${pendientes.size}\n\n${list.join("\n")}`);
     }
 
     // ===== /limpiar_pendientes =====
     if (interaction.commandName === "limpiar_pendientes") {
       await interaction.deferReply({ ephemeral: true });
+
       if (!(await invokerHasPermission(interaction))) {
         return interaction.editReply("❌ No tienes permiso.");
       }
+
       const confirmar = interaction.options.getBoolean("confirmar", true);
       console.log("[/limpiar_pendientes] Iniciando...");
+
       try {
         await ensureMembersFetched(interaction.guild);
       } catch (e) {
@@ -351,25 +390,37 @@ Ven a saludar y platicar con nosotros en <#${CHARLA_CH}> <:00_lumi_corazon:14334
         console.error("[/limpiar_pendientes] Error:", e);
         return interaction.editReply("❌ Error al cargar miembros.");
       }
+
       const pendientes = interaction.guild.members.cache.filter((m) => {
         if (m.user.bot) return false;
         if (!m.roles.cache.has(NO_VERIFICADAS_ROLE_ID)) return false;
         if (!m.joinedAt) return false;
-        return m.joinedAt.getTime() <= (Date.now() - 5 * 24 * 60 * 60 * 1000);
+        return m.joinedAt.getTime() <= Date.now() - 5 * 24 * 60 * 60 * 1000;
       });
+
       if (pendientes.size === 0) {
         return interaction.editReply("✅ No hay nadie para expulsar.");
       }
+
       if (!confirmar) {
-        await sendLog(interaction, `⚠️ **Preview /limpiar_pendientes**\nStaff: ${interaction.user.tag}\nSerían expulsadas: ${pendientes.size}`);
-        return interaction.editReply(`⚠️ **Preview**: ${pendientes.size} personas serían expulsadas.\nUsa \`confirmar:true\` para ejecutar.`);
+        await sendLog(
+          interaction,
+          `⚠️ **Preview /limpiar_pendientes**\nStaff: ${interaction.user.tag}\nSerían expulsadas: ${pendientes.size}`
+        );
+        return interaction.editReply(
+          `⚠️ **Preview**: ${pendientes.size} personas serían expulsadas.\nUsa \`confirmar:true\` para ejecutar.`
+        );
       }
+
       const me = await interaction.guild.members.fetchMe();
+
       if (!me.permissions.has(PermissionsBitField.Flags.KickMembers)) {
         return interaction.editReply("❌ No tengo permiso para expulsar.");
       }
+
       let kicked = 0;
       let failed = 0;
+
       for (const member of pendientes.values()) {
         try {
           if (member.kickable) {
@@ -384,111 +435,22 @@ Ven a saludar y platicar con nosotros en <#${CHARLA_CH}> <:00_lumi_corazon:14334
           await sleep(1500);
         }
       }
-      await sendLog(interaction,
+
+      await sendLog(
+        interaction,
         `🧹 **/limpiar_pendientes ejecutado**\n` +
-        `Staff: ${interaction.user.tag}\n` +
-        `✅ Expulsadas: ${kicked}\n` +
-        `⚠️ Fallidas: ${failed}`
+          `Staff: ${interaction.user.tag}\n` +
+          `✅ Expulsadas: ${kicked}\n` +
+          `⚠️ Fallidas: ${failed}`
       );
+
       return interaction.editReply(
         `🧹 Limpieza completa: **${kicked}** expulsadas.${failed ? ` (${failed} no se pudieron expulsar)` : ""}`
       );
     }
-
-    // ===== /metodos =====
-    if (interaction.commandName === "metodos") {
-      await interaction.deferReply({ ephemeral: true });
-      if (!(await invokerHasPermission(interaction))) {
-        return interaction.editReply("❌ No tienes permiso.");
-      }
-      const targetUser = interaction.options.getUser("usuario", true);
-      const member = await interaction.guild.members.fetch(targetUser.id).catch(() => null);
-      if (!member) {
-        return interaction.editReply("❌ No encontré al usuario en el servidor.");
-      }
-      const ticketChannel = interaction.channel;
-      if (
-        !ticketChannel.name.toLowerCase().includes("ticket") &&
-        !ticketChannel.name.toLowerCase().includes("verif")
-      ) {
-        return interaction.editReply("⚠️ Úsalo dentro de un canal de **ticket**.");
-      }
-      const metodosTexto = `Hola ${targetUser} 💜
-**Métodos disponibles:**
-1. Videollamada (cámara + mic)
-2. Foto + Audio (cámara + mic)
-3. Alianza (comprobante servidor aliado)
-4. Instagram (@femalight_dc + ≥2 fotos rostro <6 meses)
-5. Trans ("soy mujer trans" + cámara + mic)
-¿Cuál quieres? Pon el número 1-5 y te ayudamos ya ◝(ᵔᵕᵔ)◜`;
-      try {
-        const sentMsg = await ticketChannel.send({
-          content: metodosTexto,
-          allowedMentions: { users: [targetUser.id] },
-        });
-        const jumpLink = `https://discord.com/channels/${interaction.guildId}/${ticketChannel.id}/${sentMsg.id}`;
-        const logText = `📨 **/metodos usado**\nStaff: ${interaction.user.tag}\nUsuaria: ${targetUser.tag}\nTicket: <#${ticketChannel.id}>\nMensaje: ${jumpLink}`;
-        await sendLog(interaction, logText).catch(() => {});
-        return interaction.editReply(`✅ Métodos enviados en el ticket.`);
-      } catch (err) {
-        console.error("Error enviando métodos:", err);
-        return interaction.editReply(`❌ No pude enviar el mensaje. ¿Permisos?`);
-      }
-    }
-
-    // ===== /info =====
-    if (interaction.commandName === "info") {
-      await interaction.deferReply(); // visible para todos
-      if (!(await invokerHasPermission(interaction))) {
-        return interaction.editReply("❌ Solo el staff puede usar este comando.");
-      }
-      const targetUser = interaction.options.getUser("usuario", true);
-      let member = null;
-      try {
-        member = await interaction.guild.members.fetch(targetUser.id);
-      } catch {
-        member = null;
-      }
-      const createdAt = targetUser.createdAt;
-      const joinedAt = member ? member.joinedAt : null;
-      const tieneNoVerificadas = member && member.roles.cache.has(NO_VERIFICADAS_ROLE_ID);
-      const tieneGirls = member && member.roles.cache.some(r => r.name === GIRLS_ROLE_NAME);
-      const verificadaInfo = verificadas[targetUser.id];
-      let verificadorTexto = "No registrada como verificada";
-      if (verificadaInfo) {
-        const fechaVerif = new Date(verificadaInfo.fecha);
-        verificadorTexto = `Verificada por **${verificadaInfo.verificadaPorTag}** (ID: ${verificadaInfo.verificadaPor}) el <t:${Math.floor(fechaVerif.getTime() / 1000)}:f>`;
-      }
-      const roles = member
-        ? member.roles.cache.filter(r => r.id !== interaction.guild.id).map(r => r.toString()).join(", ") || "Ninguno"
-        : "No está en el servidor";
-      const embed = new EmbedBuilder()
-        .setColor(0xFADADD) // Rosita pastel
-        .setTitle(`Información de ${targetUser.tag}`)
-        .setThumbnail(targetUser.displayAvatarURL({ size: 1024 }))
-        .addFields(
-          { name: "🆔 ID", value: `${targetUser.id}`, inline: true },
-          { name: "📅 Cuenta creada", value: `<t:${Math.floor(createdAt.getTime() / 1000)}:f> (<t:${Math.floor(createdAt.getTime() / 1000)}:R>)`, inline: true },
-          { name: "📅 Se unió al servidor", value: joinedAt ? `<t:${Math.floor(joinedAt.getTime() / 1000)}:f> (<t:${Math.floor(joinedAt.getTime() / 1000)}:R>)` : "No está en el servidor", inline: true },
-          { name: "🏷️ Roles actuales", value: roles, inline: false },
-          { name: "🔒 Tiene \"No Verificadas\"", value: tieneNoVerificadas ? "Sí" : "No", inline: true },
-          { name: "✅ Verificada (Girls)", value: tieneGirls ? "Sí" : "No", inline: true },
-          { name: "👑 Verificador/a", value: verificadaInfo ? verificadorTexto : "No registrada", inline: false },
-          { name: "🤖 Es bot?", value: targetUser.bot ? "Sí" : "No", inline: true }
-        )
-        .setFooter({ text: `Solicitado por ${interaction.user.tag}` })
-        .setTimestamp();
-      await interaction.editReply({ embeds: [embed], allowedMentions: { parse: [] } });
-      await sendLog(interaction,
-        `🔍 **/info usado**\n` +
-        `Staff: ${interaction.user.tag} (${interaction.user.id})\n` +
-        `Usuario: ${targetUser.tag} (${targetUser.id})\n` +
-        `Canal: <#${interaction.channelId}>`
-      ).catch(() => {});
-    }
-
   } catch (err) {
     console.error("❌ Error en interactionCreate:", err);
+
     if (interaction.deferred || interaction.replied) {
       await interaction.editReply("❌ Error interno del bot.").catch(() => {});
     } else {
