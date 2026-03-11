@@ -264,17 +264,19 @@ function getActionText(accion) {
   return accionesTexto[accion] || "interactuó con";
 }
 
-function getActionLabel(accion) {
-  const etiquetas = {
-    abrazar: "ABRAZO",
-    besar: "BESO",
-    acariciar: "CARICIA",
-    golpear: "GOLPE",
-    acurrucar: "ACURRUCAR",
-    saludar: "SALUDO",
+function getNaturalCounterText(accion, total, nombreObjetivo) {
+  const plural = total === 1 ? "" : "s";
+
+  const textos = {
+    abrazar: `✨ **${nombreObjetivo}** ha recibido **${total} abrazo${plural}**`,
+    besar: `✨ **${nombreObjetivo}** ha recibido **${total} beso${plural}**`,
+    acariciar: `✨ **${nombreObjetivo}** ha recibido **${total} caricia${plural}**`,
+    golpear: `✨ **${nombreObjetivo}** ha recibido **${total} golpe${plural}**`,
+    acurrucar: `✨ **${nombreObjetivo}** ha recibido **${total} acurrucón${plural}**`,
+    saludar: `✨ **${nombreObjetivo}** ha recibido **${total} saludo${plural}**`,
   };
 
-  return etiquetas[accion] || accion.toUpperCase();
+  return textos[accion] || `✨ **${nombreObjetivo}** ha recibido **${total} interacción${plural}**`;
 }
 
 function ensureUserInteractionData(userId) {
@@ -675,20 +677,20 @@ Ven a saludar y platicar con nosotros en <#${CHARLA_CH}> <:00_lumi_corazon:14334
       const nombreAutor = autorMember ? autorMember.displayName : interaction.user.username;
       const nombreObjetivo = targetMember ? targetMember.displayName : targetUser.username;
 
-      ensureUserInteractionData(interaction.user.id);
-      interacciones[interaction.user.id][accion] =
-        (interacciones[interaction.user.id][accion] || 0) + 1;
+      ensureUserInteractionData(targetUser.id);
+      interacciones[targetUser.id][accion] =
+        (interacciones[targetUser.id][accion] || 0) + 1;
 
       guardarInteracciones();
 
-      const totalUsuario = interacciones[interaction.user.id][accion];
+      const totalObjetivo = interacciones[targetUser.id][accion];
       const actionText = getActionText(accion);
-      const actionLabel = getActionLabel(accion);
+      const naturalCounter = getNaturalCounterText(accion, totalObjetivo, nombreObjetivo);
 
       const embed = new EmbedBuilder()
         .setColor(0xFADADD)
         .setTitle(`${nombreAutor} ${actionText} a ${nombreObjetivo}`)
-        .setDescription(`✨ **${actionLabel} #${totalUsuario}** para **${nombreAutor}**`)
+        .setDescription(naturalCounter)
         .setImage(gif)
         .setFooter({ text: "Interacciones especiales para Server Boosters 💎" })
         .setTimestamp();
