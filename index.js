@@ -381,7 +381,7 @@ client.on("interactionCreate", async (interaction) => {
 
         const embed = new EmbedBuilder()
           .setColor("#F4A6C1")
-          .setTitle("📸 Método de verificación")
+          .setTitle("POR FAVOR DE HACER LO SIGUIENTE CORRECTAMENTE")
           .setDescription(
             `La foto tiene que tener el gesto ${gesto}\n\n` +
             `El audio debe incluir:\n` +
