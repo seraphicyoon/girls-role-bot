@@ -124,6 +124,16 @@ const metodoFotoCommand = new SlashCommandBuilder()
       )
   );
 
+const ticketCommand = new SlashCommandBuilder()
+  .setName("ticket")
+  .setDescription("Avisa cuántas horas quedan para finalizar el ticket")
+  .addUserOption((o) =>
+    o.setName("usuario").setDescription("Usuaria").setRequired(true)
+  )
+  .addIntegerOption((o) =>
+    o.setName("horas").setDescription("Horas restantes").setRequired(true)
+  );
+
 // ===== REGISTER =====
 async function registerCommands() {
   const rest = new REST({ version: "10" }).setToken(DISCORD_TOKEN);
@@ -134,6 +144,7 @@ async function registerCommands() {
     decirCommand,
     bienvenidaCommand,
     metodoFotoCommand,
+    ticketCommand,
   ].map((c) => c.toJSON());
 
   await rest.put(Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID), {
@@ -403,6 +414,40 @@ client.on("interactionCreate", async (interaction) => {
         );
 
         return interaction.editReply("✅ Método enviado");
+      }
+
+      // ===== TICKET =====
+      if (interaction.commandName === "ticket") {
+        await interaction.deferReply({ ephemeral: true });
+
+        if (!(await invokerHasPermission(interaction))) {
+          return interaction.editReply("❌ No tienes permiso.");
+        }
+
+        const user = interaction.options.getUser("usuario", true);
+        const horas = interaction.options.getInteger("horas", true);
+
+        if (horas <= 0) {
+          return interaction.editReply("❌ Las horas deben ser mayor a 0.");
+        }
+
+        const textoHoras = horas === 1 ? "hora" : "horas";
+
+        const sentMessage = await interaction.channel.send({
+          content:
+            `${user} tu ticket finalizará en ${horas} ${textoHoras}. Por favor, responde con brevedad.\n` +
+            `Recuerda que nuestro bot expulsa a las usuarias con más de 5 días de inactividad, pero puedes volver a unirte al servidor y realizar nuevamente tu verificación.`,
+          allowedMentions: { users: [user.id] },
+        });
+
+        const jumpLink = `https://discord.com/channels/${interaction.guildId}/${interaction.channelId}/${sentMessage.id}`;
+
+        await sendLog(
+          interaction,
+          `⏰ **/ticket usado**\nStaff: ${interaction.user.tag} (${interaction.user.id})\nUsuaria: ${user.tag} (${user.id})\nHoras: ${horas}\nCanal: <#${interaction.channelId}>\nLink: ${jumpLink}`
+        );
+
+        return interaction.editReply("✅ Aviso de ticket enviado.");
       }
 
       // ===== VERIFICAR =====
