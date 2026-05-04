@@ -44,6 +44,10 @@ function guardarVerificadas() {
 const NO_VERIFICADAS_ROLE_ID = "996592241260888095";
 const GIRLS_ROLE_NAME = "﹒╴girls ღﾟ˚̣̣̣";
 
+// ===== CANALES IGNORADOS PARA SPAM / INVITES =====
+// CAMBIA ESTOS DOS IDS POR LOS IDS REALES DE TUS CANALES DE MUDAE
+const IGNORED_CHANNELS = ["991988057073004556", "1479144914091643002"];
+
 const allowedRoleIds = [
   "1447179100551905321", // Admin
   "1222199503873114175", // Mod
@@ -81,7 +85,7 @@ const verificarCommand = new SlashCommandBuilder()
   .setName("verificar")
   .setDescription("Asigna el rol Girls y quita no verificadas")
   .addUserOption((o) =>
-    o.setName("usuario").setDescription("Usuario").setRequired(true)
+    o.setName("usuario").setDescription("Usuario").setRequired(true),
   );
 
 const pendientesCommand = new SlashCommandBuilder()
@@ -92,21 +96,21 @@ const decirCommand = new SlashCommandBuilder()
   .setName("decir")
   .setDescription("Enviar un mensaje como el bot (anónimo)")
   .addStringOption((o) =>
-    o.setName("mensaje").setDescription("Mensaje").setRequired(true)
+    o.setName("mensaje").setDescription("Mensaje").setRequired(true),
   );
 
 const bienvenidaCommand = new SlashCommandBuilder()
   .setName("bienvenida")
   .setDescription("Envía el mensaje de verificación/bienvenida a una usuaria")
   .addUserOption((o) =>
-    o.setName("usuario").setDescription("Usuaria").setRequired(true)
+    o.setName("usuario").setDescription("Usuaria").setRequired(true),
   );
 
 const metodoFotoCommand = new SlashCommandBuilder()
   .setName("metodo_foto")
   .setDescription("Método de verificación con foto")
   .addUserOption((o) =>
-    o.setName("usuario").setDescription("Usuaria").setRequired(true)
+    o.setName("usuario").setDescription("Usuaria").setRequired(true),
   )
   .addStringOption((o) =>
     o
@@ -120,18 +124,18 @@ const metodoFotoCommand = new SlashCommandBuilder()
         { name: "👍", value: "👍" },
         { name: "👎", value: "👎" },
         { name: "👌", value: "👌" },
-        { name: "🤌", value: "🤌" }
-      )
+        { name: "🤌", value: "🤌" },
+      ),
   );
 
 const ticketCommand = new SlashCommandBuilder()
   .setName("ticket")
   .setDescription("Avisa cuántas horas quedan para finalizar el ticket")
   .addUserOption((o) =>
-    o.setName("usuario").setDescription("Usuaria").setRequired(true)
+    o.setName("usuario").setDescription("Usuaria").setRequired(true),
   )
   .addIntegerOption((o) =>
-    o.setName("horas").setDescription("Horas restantes").setRequired(true)
+    o.setName("horas").setDescription("Horas restantes").setRequired(true),
   );
 
 // ===== REGISTER =====
@@ -183,12 +187,16 @@ async function invokerHasPermission(interaction) {
   return invoker.roles.cache.some((r) => allowedRoleIds.includes(r.id));
 }
 
-async function sendLog(interaction, content) {
+async function sendLog(source, content) {
   if (!LOG_CHANNEL_ID) return;
 
   try {
-    const logChannel = await interaction.guild.channels.fetch(LOG_CHANNEL_ID);
+    const guild = source.guild;
+    if (!guild) return;
+
+    const logChannel = await guild.channels.fetch(LOG_CHANNEL_ID);
     if (!logChannel || !logChannel.isTextBased()) return;
+
     await logChannel.send({ content, allowedMentions: { parse: [] } });
   } catch (e) {
     console.error("❌ Error enviando log:", e);
@@ -228,25 +236,27 @@ function buildPendingButtons(disabled = false) {
         .setLabel("Cancelar")
         .setStyle(ButtonStyle.Secondary)
         .setEmoji("❌")
-        .setDisabled(disabled)
+        .setDisabled(disabled),
     ),
   ];
 }
 
 function buildPendingEmbed(guild, session) {
-  const pendientesData = session.pendingUserIds.map((userId) => {
-    const member = guild.members.cache.get(userId);
-    if (!member || !member.joinedAt) return null;
+  const pendientesData = session.pendingUserIds
+    .map((userId) => {
+      const member = guild.members.cache.get(userId);
+      if (!member || !member.joinedAt) return null;
 
-    const t = Math.floor(member.joinedAt.getTime() / 1000);
-    const omitida = session.omitted[userId];
+      const t = Math.floor(member.joinedAt.getTime() / 1000);
+      const omitida = session.omitted[userId];
 
-    if (omitida) {
-      return `• ${member} — entró <t:${t}:R> — **OMITIDA**\n  Motivo: ${omitida.reason}`;
-    }
+      if (omitida) {
+        return `• **${member.displayName}** (${member.user.tag}) — ID: ${member.id} — entró <t:${t}:R> — **OMITIDA**\n  Motivo: ${omitida.reason}`;
+      }
 
-    return `• ${member} — entró <t:${t}:R>`;
-  }).filter(Boolean);
+      return `• **${member.displayName}** (${member.user.tag}) — ID: ${member.id} — entró <t:${t}:R>`;
+    })
+    .filter(Boolean);
 
   const visibles = pendientesData.slice(0, 20);
   const omitidasCount = Object.keys(session.omitted).length;
@@ -306,13 +316,9 @@ async function ensureMembersFetched(guild) {
 // ===== INTERACTIONS =====
 client.on("interactionCreate", async (interaction) => {
   try {
-    // =========================
-    // SLASH COMMANDS
-    // =========================
     if (interaction.isChatInputCommand()) {
       if (!interaction.inGuild()) return;
 
-      // ===== DECIR =====
       if (interaction.commandName === "decir") {
         await interaction.deferReply({ ephemeral: true });
 
@@ -334,13 +340,12 @@ client.on("interactionCreate", async (interaction) => {
         const jumpLink = `https://discord.com/channels/${interaction.guildId}/${interaction.channelId}/${sentMessage.id}`;
         await sendLog(
           interaction,
-          `📝 **/decir usado**\nUsuario: ${interaction.user.tag}\nCanal: <#${interaction.channelId}>\nLink: ${jumpLink}\nMensaje: ${msg}`
+          `📝 **/decir usado**\nUsuario: ${interaction.user.tag}\nCanal: <#${interaction.channelId}>\nLink: ${jumpLink}\nMensaje: ${msg}`,
         );
 
         return interaction.editReply("✅ Enviado");
       }
 
-      // ===== BIENVENIDA =====
       if (interaction.commandName === "bienvenida") {
         await interaction.deferReply({ ephemeral: true });
 
@@ -358,10 +363,10 @@ client.on("interactionCreate", async (interaction) => {
           .setColor("#F4A6C1")
           .setDescription(
             `Listo ${user} ya has sido verificada, espero y disfrutes tu estancia en el servidor <:01_lumi_corazon:1435352473543114832>\n\n` +
-            `Te invito a pasarte por <#${ROLES_CH}> para llenar datos de tu perfil <:00_lumi_aww:1433442969662263427>\n` +
-            `Te esperamos con tu <#${PRESENTACION_CH}> para conocerte mejor‼️\n` +
-            `Si tienes dudas o sugerencias puedes dejarlas por aquí <#${DUDAS_CH}>\n` +
-            `Ven a saludar y platicar con nosotros en <#${CHARLA_CH}> <:00_lumi_corazon:1433443102189813771>`
+              `Te invito a pasarte por <#${ROLES_CH}> para llenar datos de tu perfil <:00_lumi_aww:1433442969662263427>\n` +
+              `Te esperamos con tu <#${PRESENTACION_CH}> para conocerte mejor‼️\n` +
+              `Si tienes dudas o sugerencias puedes dejarlas por aquí <#${DUDAS_CH}>\n` +
+              `Ven a saludar y platicar con nosotros en <#${CHARLA_CH}> <:00_lumi_corazon:1433443102189813771>`,
           );
 
         const sentMessage = await interaction.channel.send({
@@ -373,13 +378,12 @@ client.on("interactionCreate", async (interaction) => {
         const jumpLink = `https://discord.com/channels/${interaction.guildId}/${interaction.channelId}/${sentMessage.id}`;
         await sendLog(
           interaction,
-          `💌 **/bienvenida usado**\nStaff: ${interaction.user.tag} (${interaction.user.id})\nUsuaria: ${user.tag} (${user.id})\nCanal: <#${interaction.channelId}>\nLink: ${jumpLink}`
+          `💌 **/bienvenida usado**\nStaff: ${interaction.user.tag} (${interaction.user.id})\nUsuaria: ${user.tag} (${user.id})\nCanal: <#${interaction.channelId}>\nLink: ${jumpLink}`,
         );
 
         return interaction.editReply("✅ Bienvenida enviada.");
       }
 
-      // ===== METODO FOTO =====
       if (interaction.commandName === "metodo_foto") {
         await interaction.deferReply({ ephemeral: true });
 
@@ -395,10 +399,10 @@ client.on("interactionCreate", async (interaction) => {
           .setTitle("POR FAVOR DE HACER LO SIGUIENTE CORRECTAMENTE")
           .setDescription(
             `La foto tiene que tener el gesto ${gesto}\n\n` +
-            `El audio debe incluir:\n` +
-            `• Nombre de Discord\n` +
-            `• Edad\n` +
-            `• Pronombre (ella, él, elle)`
+              `El audio debe incluir:\n` +
+              `• Nombre de Discord\n` +
+              `• Edad\n` +
+              `• Pronombre (ella, él, elle)`,
           );
 
         const sentMessage = await interaction.channel.send({
@@ -410,13 +414,12 @@ client.on("interactionCreate", async (interaction) => {
         const jumpLink = `https://discord.com/channels/${interaction.guildId}/${interaction.channelId}/${sentMessage.id}`;
         await sendLog(
           interaction,
-          `📸 **/metodo_foto usado**\nStaff: ${interaction.user.tag} (${interaction.user.id})\nUsuaria: ${user.tag} (${user.id})\nGesto elegido: ${gesto}\nCanal: <#${interaction.channelId}>\nLink: ${jumpLink}`
+          `📸 **/metodo_foto usado**\nStaff: ${interaction.user.tag} (${interaction.user.id})\nUsuaria: ${user.tag} (${user.id})\nGesto elegido: ${gesto}\nCanal: <#${interaction.channelId}>\nLink: ${jumpLink}`,
         );
 
         return interaction.editReply("✅ Método enviado");
       }
 
-      // ===== TICKET =====
       if (interaction.commandName === "ticket") {
         await interaction.deferReply({ ephemeral: true });
 
@@ -431,11 +434,13 @@ client.on("interactionCreate", async (interaction) => {
           return interaction.editReply("❌ Las horas deben ser mayor a 0.");
         }
 
-        const textoHoras = horas === 1 ? "hora" : "horas";
+        const fechaFinal = Math.floor(
+          (Date.now() + horas * 60 * 60 * 1000) / 1000,
+        );
 
         const sentMessage = await interaction.channel.send({
           content:
-            `${user} tu ticket finalizará en ${horas} ${textoHoras}. Por favor, responde con brevedad.\n` +
+            `${user} tu ticket finalizará <t:${fechaFinal}:R>. Por favor, responde con brevedad.\n` +
             `Recuerda que nuestro bot expulsa a las usuarias con más de 5 días de inactividad, pero puedes volver a unirte al servidor y realizar nuevamente tu verificación.`,
           allowedMentions: { users: [user.id] },
         });
@@ -444,13 +449,12 @@ client.on("interactionCreate", async (interaction) => {
 
         await sendLog(
           interaction,
-          `⏰ **/ticket usado**\nStaff: ${interaction.user.tag} (${interaction.user.id})\nUsuaria: ${user.tag} (${user.id})\nHoras: ${horas}\nCanal: <#${interaction.channelId}>\nLink: ${jumpLink}`
+          `⏰ **/ticket usado**\nStaff: ${interaction.user.tag} (${interaction.user.id})\nUsuaria: ${user.tag} (${user.id})\nHoras: ${horas}\nCanal: <#${interaction.channelId}>\nLink: ${jumpLink}`,
         );
 
         return interaction.editReply("✅ Aviso de ticket enviado.");
       }
 
-      // ===== VERIFICAR =====
       if (interaction.commandName === "verificar") {
         await interaction.deferReply({ ephemeral: true });
 
@@ -460,21 +464,27 @@ client.on("interactionCreate", async (interaction) => {
 
         const member = interaction.options.getMember("usuario");
         const role = interaction.guild.roles.cache.find(
-          (r) => r.name === GIRLS_ROLE_NAME
+          (r) => r.name === GIRLS_ROLE_NAME,
         );
 
         if (!member || !role) {
-          return interaction.editReply("❌ No pude encontrar al usuario o el rol.");
+          return interaction.editReply(
+            "❌ No pude encontrar al usuario o el rol.",
+          );
         }
 
         const me = await interaction.guild.members.fetchMe();
 
         if (!me.permissions.has(PermissionsBitField.Flags.ManageRoles)) {
-          return interaction.editReply("❌ No tengo permiso para administrar roles.");
+          return interaction.editReply(
+            "❌ No tengo permiso para administrar roles.",
+          );
         }
 
         if (me.roles.highest.position <= role.position) {
-          return interaction.editReply("❌ Mi rol debe estar arriba del rol Girls.");
+          return interaction.editReply(
+            "❌ Mi rol debe estar arriba del rol Girls.",
+          );
         }
 
         if (!member.roles.cache.has(role.id)) {
@@ -494,13 +504,12 @@ client.on("interactionCreate", async (interaction) => {
 
         await sendLog(
           interaction,
-          `✅ **/verificar usado** por ${interaction.user.tag} a ${member.user.tag}`
+          `✅ **/verificar usado** por ${interaction.user.tag} a ${member.user.tag}`,
         );
 
         return interaction.editReply("✅ Verificada");
       }
 
-      // ===== PENDIENTES =====
       if (interaction.commandName === "pendientes") {
         await interaction.deferReply({ ephemeral: true });
 
@@ -522,7 +531,7 @@ client.on("interactionCreate", async (interaction) => {
             embeds: [
               buildDisabledPendingEmbed(
                 "📌 Pendientes de verificación",
-                "✅ No hay pendientes de 5 días."
+                "✅ No hay pendientes de 5 días.",
               ),
             ],
             components: [],
@@ -546,7 +555,7 @@ client.on("interactionCreate", async (interaction) => {
 
         await sendLog(
           interaction,
-          `📌 **/pendientes usado**\nStaff: ${interaction.user.tag}\nEncontradas: ${orderedIds.length}`
+          `📌 **/pendientes usado**\nStaff: ${interaction.user.tag}\nEncontradas: ${orderedIds.length}`,
         );
 
         return interaction.editReply({
@@ -556,9 +565,6 @@ client.on("interactionCreate", async (interaction) => {
       }
     }
 
-    // =========================
-    // BUTTONS
-    // =========================
     if (interaction.isButton()) {
       if (!interaction.inGuild()) return;
 
@@ -566,7 +572,8 @@ client.on("interactionCreate", async (interaction) => {
 
       if (!session) {
         return interaction.reply({
-          content: "❌ Ya no hay una sesión activa. Usa `/pendientes` otra vez.",
+          content:
+            "❌ Ya no hay una sesión activa. Usa `/pendientes` otra vez.",
           ephemeral: true,
         });
       }
@@ -585,7 +592,7 @@ client.on("interactionCreate", async (interaction) => {
           embeds: [
             buildDisabledPendingEmbed(
               "❌ Limpieza cancelada",
-              "La operación fue cancelada. Usa `/pendientes` otra vez si quieres revisar la lista."
+              "La operación fue cancelada. Usa `/pendientes` otra vez si quieres revisar la lista.",
             ),
           ],
           components: buildPendingButtons(true),
@@ -609,13 +616,15 @@ client.on("interactionCreate", async (interaction) => {
           .setCustomId("omit_reason")
           .setLabel("¿Por qué quieres omitirla?")
           .setStyle(TextInputStyle.Paragraph)
-          .setPlaceholder("Ejemplo: ya avisó, está en proceso, error del sistema...")
+          .setPlaceholder(
+            "Ejemplo: ya avisó, está en proceso, error del sistema...",
+          )
           .setRequired(true)
           .setMaxLength(400);
 
         modal.addComponents(
           new ActionRowBuilder().addComponents(userInput),
-          new ActionRowBuilder().addComponents(reasonInput)
+          new ActionRowBuilder().addComponents(reasonInput),
         );
 
         return interaction.showModal(modal);
@@ -623,6 +632,17 @@ client.on("interactionCreate", async (interaction) => {
 
       if (interaction.customId === "pendientes_expulsar") {
         await interaction.deferUpdate();
+
+        await interaction.editReply({
+          embeds: [
+            new EmbedBuilder()
+              .setColor("#F4A6C1")
+              .setTitle("⏳ Procesando...")
+              .setDescription("Expulsando usuarias, por favor espera...")
+              .setTimestamp(),
+          ],
+          components: buildPendingButtons(true),
+        });
 
         await ensureMembersFetched(interaction.guild);
 
@@ -632,7 +652,7 @@ client.on("interactionCreate", async (interaction) => {
             embeds: [
               buildDisabledPendingEmbed(
                 "❌ No pude expulsar",
-                "No tengo permiso para expulsar miembros."
+                "No tengo permiso para expulsar miembros.",
               ),
             ],
             components: buildPendingButtons(true),
@@ -640,7 +660,9 @@ client.on("interactionCreate", async (interaction) => {
         }
 
         const excludedIds = Object.keys(session.omitted);
-        const toKickIds = session.pendingUserIds.filter((id) => !excludedIds.includes(id));
+        const toKickIds = session.pendingUserIds.filter(
+          (id) => !excludedIds.includes(id),
+        );
 
         let kicked = 0;
         let failed = 0;
@@ -648,7 +670,10 @@ client.on("interactionCreate", async (interaction) => {
         const failedTags = [];
 
         for (const userId of toKickIds) {
-          const member = interaction.guild.members.cache.get(userId);
+          const member =
+            interaction.guild.members.cache.get(userId) ||
+            (await interaction.guild.members.fetch(userId).catch(() => null));
+
           if (!member) {
             failed++;
             failedTags.push(`ID ${userId} (no encontrado)`);
@@ -672,9 +697,11 @@ client.on("interactionCreate", async (interaction) => {
           }
         }
 
-        const omittedLines = Object.entries(session.omitted).map(([userId, info]) => {
-          return `• ${info.tag} (${userId}) — ${info.reason}`;
-        });
+        const omittedLines = Object.entries(session.omitted).map(
+          ([userId, info]) => {
+            return `• ${info.tag} (${userId}) — ${info.reason}`;
+          },
+        );
 
         await sendLog(
           interaction,
@@ -692,7 +719,7 @@ client.on("interactionCreate", async (interaction) => {
               : "") +
             (failedTags.length
               ? `\n\n**No expulsadas:**\n${failedTags.map((x) => `• ${x}`).join("\n")}`
-              : "")
+              : ""),
         );
 
         pendingSessions.delete(interaction.user.id);
@@ -706,7 +733,7 @@ client.on("interactionCreate", async (interaction) => {
                 `**Fallidas:** ${failed}` +
                 (omittedLines.length
                   ? `\n\n**Omitidas:**\n${omittedLines.join("\n")}`
-                  : "")
+                  : ""),
             ),
           ],
           components: buildPendingButtons(true),
@@ -714,9 +741,6 @@ client.on("interactionCreate", async (interaction) => {
       }
     }
 
-    // =========================
-    // MODALS
-    // =========================
     if (interaction.isModalSubmit()) {
       if (!interaction.inGuild()) return;
 
@@ -725,13 +749,16 @@ client.on("interactionCreate", async (interaction) => {
 
         if (!session) {
           return interaction.reply({
-            content: "❌ Ya no hay una sesión activa. Usa `/pendientes` otra vez.",
+            content:
+              "❌ Ya no hay una sesión activa. Usa `/pendientes` otra vez.",
             ephemeral: true,
           });
         }
 
         const rawUser = interaction.fields.getTextInputValue("omit_user");
-        const reason = interaction.fields.getTextInputValue("omit_reason").trim();
+        const reason = interaction.fields
+          .getTextInputValue("omit_reason")
+          .trim();
         const userId = extractUserIdFromInput(rawUser);
 
         if (!userId) {
@@ -748,8 +775,9 @@ client.on("interactionCreate", async (interaction) => {
           });
         }
 
-        const member = interaction.guild.members.cache.get(userId) ||
-          await interaction.guild.members.fetch(userId).catch(() => null);
+        const member =
+          interaction.guild.members.cache.get(userId) ||
+          (await interaction.guild.members.fetch(userId).catch(() => null));
 
         if (!member) {
           return interaction.reply({
@@ -772,7 +800,7 @@ client.on("interactionCreate", async (interaction) => {
           `📝 **Usuaria omitida de limpieza**\n` +
             `Staff: ${interaction.user.tag} (${interaction.user.id})\n` +
             `Usuaria: ${member.user.tag} (${member.id})\n` +
-            `Motivo: ${reason}`
+            `Motivo: ${reason}`,
         );
 
         return interaction.reply({
@@ -787,11 +815,85 @@ client.on("interactionCreate", async (interaction) => {
 
     if (interaction.isRepliable()) {
       if (interaction.deferred || interaction.replied) {
-        await interaction.editReply("❌ Error interno del bot.").catch(() => {});
+        await interaction
+          .editReply("❌ Error interno del bot.")
+          .catch(() => {});
       } else {
-        await interaction.reply({ content: "❌ Error interno del bot.", ephemeral: true }).catch(() => {});
+        await interaction
+          .reply({ content: "❌ Error interno del bot.", ephemeral: true })
+          .catch(() => {});
       }
     }
+  }
+});
+
+const userMessageMap = new Map();
+
+// ===== DETECTOR DE INVITES Y SPAM =====
+client.on("messageCreate", async (message) => {
+  try {
+    if (!message.guild) return;
+    if (message.author.bot) return;
+
+    // 🚫 Aquí el bot ignora completamente los canales de Mudae
+    if (IGNORED_CHANNELS.includes(message.channel.id)) return;
+
+    const now = Date.now();
+    const userId = message.author.id;
+
+    if (!userMessageMap.has(userId)) {
+      userMessageMap.set(userId, []);
+    }
+
+    const timestamps = userMessageMap
+      .get(userId)
+      .filter((time) => now - time < 6000);
+
+    timestamps.push(now);
+    userMessageMap.set(userId, timestamps);
+
+    if (timestamps.length >= 5) {
+      await message.delete().catch(() => null);
+
+      const warning = await message.channel.send({
+        content: `${message.author} no hagas spam. Si continúas, podrías ser sancionada.`,
+        allowedMentions: { users: [message.author.id] },
+      });
+
+      await sendLog(
+        { guild: message.guild },
+        `🚨 **Posible spam/raid detectado**\nUsuario: ${message.author.tag} (${message.author.id})\nCanal: <#${message.channel.id}>\nMensajes en pocos segundos: ${timestamps.length}`,
+      );
+
+      setTimeout(() => {
+        warning.delete().catch(() => null);
+      }, 10000);
+
+      return;
+    }
+
+    const inviteRegex =
+      /(discord\.gg\/|discord\.com\/invite\/|discordapp\.com\/invite\/)/i;
+
+    if (!inviteRegex.test(message.content)) return;
+
+    await message.delete().catch(() => null);
+
+    const warning = await message.channel.send({
+      content: `${message.author} no está permitido mandar enlaces de invitación a otros servidores. Por favor, evita compartirlos nuevamente.`,
+      allowedMentions: { users: [message.author.id] },
+    });
+
+    await sendLog(
+      { guild: message.guild },
+      `🚫 **Invite eliminado**\nUsuario: ${message.author.tag} (${message.author.id})\nCanal: <#${message.channel.id}>\nMensaje eliminado: ${message.content}`,
+    );
+
+    setTimeout(() => {
+      warning.delete().catch(() => null);
+    }, 15000);
+  } catch (e) {
+    console.error("❌ Error en detector de invites:", e);
   }
 });
 
